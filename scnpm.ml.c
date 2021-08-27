@@ -27,7 +27,7 @@ value mlj_open(value v_fields) {
 	while (v_fields != Val_emptylist) {
 		v_head = Field(v_fields, 0); v_fields = Field(v_fields, 1);
 		slen = caml_string_length(v_head);
-		fields[field_count] = strncpy(malloc(slen), String_val(v_head), slen);
+		fields[field_count] = strncpy(malloc(slen), String_val(v_head), slen+1);
 		if (++field_count > 10) caml_failwith("Too many fields"); }
 
 	// Not sure why sd_journal_next_skip seem to be needed after sd_journal_seek_tail

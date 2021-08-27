@@ -36,8 +36,9 @@ let () =
 
 
 (* journal_record and journal_fields should have same field count/order *)
-type journal_record = {msg: string} [@@boxed]
-let journal_fields = ["MESSAGE"]
+(* XXX: msg is here for debugging only, can also use JOB_TYPE=start/stop/restart/etc *)
+type journal_record = {msg: string; u: string; uu: string} [@@boxed]
+let journal_fields = ["MESSAGE"; "UNIT"; "USER_UNIT"]
 
 (* Simple sd-journal bindings from scnpm.ml.c *)
 external journal_open : string list -> unit = "mlj_open"
@@ -50,7 +51,7 @@ external journal_match_or : unit -> unit = "mlj_match_or"
 external journal_match_and : unit -> unit = "mlj_match_and"
 external journal_match_flush : unit -> unit = "mlj_match_flush"
 
-let journal_wait_us = 3600_000_000 (* doesn't need a limit for local journal *)
+let journal_wait_us = 3600_000_000 (* don't need a limit for local journal *)
 
 
 let tail_journal () =
@@ -58,8 +59,17 @@ let tail_journal () =
 		let res = try f x with e -> finally y; raise e in finally y; res in
 	let debug_print line = if !cli_debug then print_endline line; flush stdout in
 
-	(* XXX: add matchers in init *)
-	let init () = journal_open journal_fields in
+	let init () =
+		journal_open journal_fields;
+		(* systemd journal match-list uses CNF logic (AND of ORs), e.g. "level=X && (unit=A || ... || tag=B || ...)"
+		 * online CNF calculator: https://www.dcode.fr/boolean-expressions-calculator
+		 * systemd does not support negation atm - https://github.com/systemd/systemd/pull/12592 *)
+		journal_match("SYSLOG_IDENTIFIER=systemd");
+		journal_match("JOB_RESULT=done");
+		journal_match_and();
+		journal_match("_SYSTEMD_USER_UNIT=init.scope");
+		journal_match_or();
+		journal_match("_SYSTEMD_UNIT=init.scope") in
 	let cleanup () = journal_close () in
 
 	let tail = (* infinite stream of journal_record *)
@@ -78,16 +88,14 @@ let tail_journal () =
 			debug_print "journal :: poll...";
 			let update = journal_wait journal_wait_us in
 			if update then tail_parse () else tail_parse_wait () in
-		let tail_iter n =
-			let jr = try Queue.take tail_queue
-				with Queue.Empty -> tail_parse_wait (); Queue.take tail_queue in
-			Option.some jr in
+		let rec tail_iter n =
+			try Option.some (Queue.take tail_queue)
+			with Queue.Empty -> tail_parse_wait (); tail_iter n in
 		Stream.from tail_iter in
 
 	let rec run_tail_loop () =
 		let jr = Stream.next tail in
-		(* XXX: just to test stream, see also rewind-hack in mlj_open for this to work w/o blocking *)
-		Printf.printf "--- record :: %s\n" jr.msg;
+		Printf.printf "--- record :: u=%s uu=%s :: %s\n" jr.u jr.uu jr.msg;
 		run_tail_loop () in
 
 	debug_print "Starting journal-parser loop...";
