@@ -130,6 +130,9 @@ That should produce ~1.5M binary, linked against libsystemd (for journal access)
 and libnftables (to re-apply cgroupv2 nftables rules), which can be installed and
 copied between systems normally.
 
+Journal is used as event source instead of dbus signals to be able to monitor
+state of all "systemd --user" unit instances as well as system ones.
+
 .. _OCaml: https://ocaml.org/
 
 
@@ -138,9 +141,6 @@ Usage
 -----
 
 Not implemented yet.
-
-| TODO: should probably use sd-dbus and dbus signals instead of journal
-| TODO: note on server-side journal filtering, if I'll stick to using it
 
 
 
