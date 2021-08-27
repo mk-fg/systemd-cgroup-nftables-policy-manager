@@ -1,11 +1,14 @@
 systemd cgroup (v2) nftables policy manager
 ===========================================
 
+.. contents::
+  :backlinks: none
+
 
 Description
 -----------
 
-Script that adds and updates nftables_ cgroupv2 filtering rules for
+Tool that adds and updates nftables_ cgroupv2 filtering rules for
 systemd_-managed per-unit cgroups (slices, services, scopes).
 
 "cgroupv2" is also often referred to as "unified cgroup hierarchy" (considered
@@ -72,9 +75,9 @@ This is `how "socket cgroupv2" matcher in nftables is intended to work`_::
   processes to that cgroup. You only have to follow the right sequence
   to avoid problems.
 
-So that's pretty much what python script here does, subscribing to systemd unit
-start/stop events via journal (using systemd python bindings) and updating any
-relevant rules on events from there (using nftables python bindings).
+So that's pretty much what this tool does, subscribing to systemd unit
+start/stop events via journal (using libsystemd) and updating any relevant
+rules on events from there (using libnftables).
 
 It was proposed for systemd itself to do something like that in `systemd#7327`_,
 but unlikely to be implemented, as (at least so far) systemd does not manage
@@ -100,7 +103,7 @@ no reason for random and insecure apps like a web browsers or games to be able
 to connect to anything there, and that is trivial to block via single firewall
 rule.
 
-This script manages a whitelist of systemd units that should have access there
+This tool manages a whitelist of systemd units that should have access there
 (and hence are allowed to bypass such rule) on top of that.
 
 This is hard to implement with systemd's resource-control eBPF restrictions,
@@ -112,10 +115,32 @@ such stuff is most needed (i.e. your terminal or whatever client apps).
 
 
 
+Build / Install
+---------------
+
+This is a simple OCaml_ app with C bindings, which can be built using any modern
+(4.10+) ocamlopt compiler and the usual make::
+
+  % make
+  % scnpm --help
+  Usage: ./scnpm [opts] [nft-configs ...]
+  ...
+
+That should produce ~1.5M binary, linked against libsystemd (for journal access)
+and libnftables (to re-apply cgroupv2 nftables rules), which can be installed and
+copied between systems normally.
+
+.. _OCaml: https://ocaml.org/
+
+
+
 Usage
 -----
 
 Not implemented yet.
+
+| TODO: should probably use sd-dbus and dbus signals instead of journal
+| TODO: note on server-side journal filtering, if I'll stick to using it
 
 
 
