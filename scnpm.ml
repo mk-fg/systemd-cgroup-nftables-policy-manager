@@ -36,8 +36,8 @@ let () =
 
 
 (* journal_record and journal_fields should have same field count/order *)
-(* XXX: msg is here for debugging only, can also use JOB_TYPE=start/stop/restart/etc *)
-type journal_record = {msg: string; u: string; uu: string} [@@boxed]
+(* Can also check/use JOB_TYPE=start/stop/restart/etc *)
+type journal_record = {u: string; uu: string} [@@boxed]
 let journal_fields = ["MESSAGE"; "UNIT"; "USER_UNIT"]
 
 (* Simple sd-journal bindings from scnpm.ml.c *)
@@ -64,28 +64,29 @@ let tail_journal () =
 		(* systemd journal match-list uses CNF logic (AND of ORs), e.g. "level=X && (unit=A || ... || tag=B || ...)"
 		 * online CNF calculator: https://www.dcode.fr/boolean-expressions-calculator
 		 * systemd does not support negation atm - https://github.com/systemd/systemd/pull/12592 *)
-		journal_match("SYSLOG_IDENTIFIER=systemd");
-		journal_match("JOB_RESULT=done");
-		journal_match_and();
-		journal_match("_SYSTEMD_USER_UNIT=init.scope");
-		journal_match_or();
-		journal_match("_SYSTEMD_UNIT=init.scope") in
+		journal_match "SYSLOG_IDENTIFIER=systemd";
+		journal_match "JOB_RESULT=done";
+		journal_match_and ();
+		journal_match "_SYSTEMD_UNIT=init.scope";
+		journal_match_or ();
+		journal_match "_SYSTEMD_USER_UNIT=init.scope" in
 	let cleanup () = journal_close () in
 
 	let tail = (* infinite stream of journal_record *)
 		let tail_queue = Queue.create () in
 		let tail_parse () =
-			debug_print "journal :: parsing msg backlog:";
+			(* debug_print "journal :: parsing msg backlog"; *)
 			let rec tail_parse_iter () =
 				let jr = journal_read () in
-				if (String.length jr.msg) != 0 then
-					debug_print (Printf.sprintf "journal :: - msg: %s" jr.msg);
-					Queue.add jr tail_queue;
+				(* debug_print (Printf.sprintf "journal :: - msg: %s" jr.msg); *)
+				Queue.add jr tail_queue;
 				tail_parse_iter () in
 			try tail_parse_iter ()
-			with End_of_file -> debug_print (Printf.sprintf "journal :: -- done (queued=%d)" (Queue.length tail_queue)) in
+			with End_of_file -> () in
+				(* let queue_len = Queue.length tail_queue in
+				 * debug_print (Printf.sprintf "journal :: parser-done queue=%d" queue_len) in *)
 		let rec tail_parse_wait () =
-			debug_print "journal :: poll...";
+			(* debug_print "journal :: poll..."; *)
 			let update = journal_wait journal_wait_us in
 			if update then tail_parse () else tail_parse_wait () in
 		let rec tail_iter n =
@@ -95,7 +96,7 @@ let tail_journal () =
 
 	let rec run_tail_loop () =
 		let jr = Stream.next tail in
-		Printf.printf "--- record :: u=%s uu=%s :: %s\n" jr.u jr.uu jr.msg;
+		debug_print (Printf.sprintf "journal :: event u=%s uu=%s" jr.u jr.uu);
 		run_tail_loop () in
 
 	debug_print "Starting journal-parser loop...";

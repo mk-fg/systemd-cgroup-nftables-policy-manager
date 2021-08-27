@@ -32,9 +32,9 @@ value mlj_open(value v_fields) {
 
 	// Not sure why sd_journal_next_skip seem to be needed after sd_journal_seek_tail
 	// Simple next() returns some tail entries, which is weirdly arbitrary, so skip 10 jic
-	/* if (sd_journal_next_skip(jj, 10) < 0) caml_failwith("sd_journal_next_skip failed"); */
-	// XXX: return 5 last entries for testing
-	if (sd_journal_previous_skip(jj, 5) < 0) caml_failwith("sd_journal_prev failed");
+	if (sd_journal_next_skip(jj, 10) < 0) caml_failwith("sd_journal_next_skip failed");
+	// Return 5 last entries for testing:
+	/* if (sd_journal_previous_skip(jj, 5) < 0) caml_failwith("sd_journal_prev failed"); */
 
 	CAMLreturn(Val_unit);
 }
