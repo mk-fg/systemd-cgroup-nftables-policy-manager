@@ -1,0 +1,22 @@
+[Unit]
+After=nftables.service
+
+[Service]
+Type=exec
+ExecStart=scnpm --flush /etc/nftables.conf
+
+DynamicUser=yes
+SupplementaryGroups=systemd-journal
+ProtectProc=noaccess
+ProcSubset=pid
+ProtectHome=yes
+PrivateDevices=yes
+
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN
+RestrictAddressFamilies=AF_NETLINK
+SecureBits=keep-caps-locked noroot-locked
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target

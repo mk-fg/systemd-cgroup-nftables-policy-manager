@@ -8,7 +8,7 @@ systemd cgroup (v2) nftables policy manager
 Description
 -----------
 
-Tool that adds and updates nftables_ cgroupv2 filtering rules for
+Small tool that adds and updates nftables_ cgroupv2 filtering rules for
 systemd_-managed per-unit cgroups (slices, services, scopes).
 
 "cgroupv2" is also often referred to as "unified cgroup hierarchy" (considered
@@ -75,16 +75,16 @@ This is `how "socket cgroupv2" matcher in nftables is intended to work`_::
   processes to that cgroup. You only have to follow the right sequence
   to avoid problems.
 
-So that's pretty much what this tool does, subscribing to systemd unit
-start/stop events via journal (using libsystemd) and updating any relevant
-rules on events from there (using libnftables).
+So that's pretty much what this simple tool does, subscribing to systemd unit
+start/stop events via journal (using libsystemd) and updating any relevant rules
+on events from there (using libnftables).
 
 It was proposed for systemd itself to do something like that in `systemd#7327`_,
 but is unlikely to be implemented, as (at least so far) systemd does not manage
 netfilter firewall configurations.
 
 Note that systemd has built-in network filtering via eBPFs attached to cgroups
-(via IPAddressAllow/Deny=, BPFProgram=, IPEgressFilterPath=, and similar options)
+(IPAddressAllow/Deny=, BPFProgram=, IPEgressFilterPath= and similar options)
 which can be used as an alternative to this kind of system-wide policy approach
 for at least some use-cases, though might be more difficult to combine and maintain
 in multiple places, with more lax permissions, and with limited matching capabilities.
@@ -96,25 +96,25 @@ in multiple places, with more lax permissions, and with limited matching capabil
 Intended use-case:
 ~~~~~~~~~~~~~~~~~~
 
-Defining system-wide policy to whitelist outgoing connections from specific
-systemd units (can be services/apps, slices of those, or ad-hoc scopes)
-in an easy and relatively foolproof way.
+Defining system-wide policy to whitelist connections to/from specific systemd
+units (can be services/apps, slices of those, or ad-hoc scopes) in an easy and
+relatively foolproof way.
 
 I.e. if a desktop system is connected to some kind of "intranet" VPN, there's
-no reason for random and insecure apps like web browsers or games to be able
+no reason for random complex and leaky apps like web browsers or games to be able
 to connect to anything there (think fetch() JS call from any site you visit),
 and that is trivial to block with a single firewall rule.
 
-This tool is intended to manage a whitelist of rules for systemd units that
-should have access there (and hence are allowed to bypass such rule) on top of that.
+This tool is intended to manage a whitelist of rules for systemd units on top,
+that should have access there, and hence are allowed to bypass such rule.
 
 
 
 Build / Install
 ---------------
 
-This is a simple OCaml_ app with C bindings, which can be built using any modern
-(4.10+) ocamlopt compiler and the usual make::
+This is a small OCaml_ cli app with C bindings, which can be built using any
+modern (4.10+) ocamlopt compiler and the usual make::
 
   % make
   % scnpm --help
@@ -124,15 +124,17 @@ This is a simple OCaml_ app with C bindings, which can be built using any modern
 That should produce ~1M binary, linked against libsystemd (for journal access)
 and libnftables (to re-apply cgroupv2 nftables rules), which can then be installed
 and copied between systems normally.
-
 OCaml compiler is only needed to build the tool, not to run it.
 
-Journal is used as an event source instead of more conventional dbus signals to be
-able to monitor state of all "systemd --user" unit instances as well as system ones,
-which will be sent over multiple transient dbus'es, so much more difficult to
-reliably track otherwise.
+scnpm.service_ systemd unit file can be used to auto-start it on boot.
+
+Journal is used as an event source instead of more conventional dbus signals to
+be able to monitor state changes of units under all "systemd --user" instances
+as well as system ones, which are sent through multiple transient dbus brokers,
+so much more difficult to reliably track there.
 
 .. _OCaml: https://ocaml.org/
+.. _scnpm.service: scnpm.service
 
 
 
@@ -143,26 +145,19 @@ Tool is designed to parse special commented-out rules for it from the same
 nftables.conf as used with the rest of ruleset, for consistency
 (though of course they can be stored in any other file(s) as well)::
 
-  ## Allow connections to/from vpn for system postfix.service
+  ## Allow connections to smtp over vpn for system postfix.service
   # postfix.service :: add rule inet filter vpn.whitelist \
   #   socket cgroupv2 level 2 "system.slice/postfix.service" tcp dport 25 accept
 
-  ## Allow connections to/from vpn for a scope unit running under "systemd --user"
+  ## Allow connections to intranet mail for a scope unit running under "systemd --user"
   ## "systemd-run" can be used to easily start apps in custom scopes or slices
   # app-mail.scope :: add rule inet filter vpn.whitelist socket cgroupv2 level 5 \
   #   "user.slice/user-1000.slice/user@1000.service/app.slice/app-mail.scope" \
-  #   tcp dport {25, 143} accept
+  #   ip daddr mail.intranet.local tcp dport {25, 143} accept
 
   ## Only allow whitelisted apps to connect over "my-vpn" iface
   add rule inet filter output oifname my-vpn jump vpn.whitelist
   add rule inet filter output oifname my-vpn reject with icmpx type admin-prohibited
-
-  ## Only allow whitelisted apps to receive connections from "my-vpn" iface
-  add rule inet filter output iifname my-vpn jump vpn.whitelist
-  add rule inet filter output iifname my-vpn reject with icmpx type admin-prohibited
-
-  ## Note: instead of "reject" rules above, chain policy can be used when declaring it:
-  # add chain inet filter vpn.whitelist { policy drop; }
 
 Commented-out "add rule" lines would normally make this config fail to apply on
 boot, as those service/scope/slice cgroups won't exist yet at that point in time.
@@ -199,11 +194,12 @@ or systemd.path unit monitoring state of such source configuration files.
 
 Syntax errors in nft rules should produce warnings when these are applied on
 tool start or changes, so should be hard to miss, but maybe do check "nft list chain"
-or debug output when rules are supposed to be enabled after conf changes anyway.
+or debug output when rules are supposed to be enabled after conf updates anyway.
 
-To modify nftables rulesets, CAP_NET_ADMIN capability is requied, which can be
+To modify nftables rulesets, CAP_NET_ADMIN capability is required, which can be
 passed via AmbientCapabilities= in systemd service (or similar option in capsh)
-in addition to SupplementaryGroups=systemd-journal to avoid running this as full root.
+in addition to SupplementaryGroups=systemd-journal and netlink access to avoid
+running this as full root.
 
 
 

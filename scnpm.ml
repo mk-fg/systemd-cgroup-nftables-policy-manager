@@ -1,7 +1,8 @@
 (* Systemd cgroup (v2) nftables policy manager tool
  *
  * Build with:
- *   % ocamlopt -o scnpm -O2 str.cmxa -cclib -lsystemd scnpm.ml scnpm.ml.c
+ *   % ocamlopt -o scnpm -O2 str.cmxa \
+ *       -cclib -lsystemd -cclib -lnftables scnpm.ml scnpm.ml.c
  *   % strip scnpm
  *
  * Usage:
@@ -16,7 +17,6 @@ let cli_quiet = ref false
 let cli_flush_chains = ref false
 let cli_nft_configs = ref []
 
-(* Command-line args processing *)
 let () =
 	let t = "\n      " in
 	Arg.parse
@@ -161,7 +161,6 @@ let parse_unit_rules nft_configs =
 
 
 let nft_state rules_cg flush_chains =
-	nft_init ();
 	let rules_nft = Hashtbl.create nft_table_size_hint in
 	let re_prefix, re_handle, re_add_skip = Str.(
 		regexp "^[^ ]+ +[^ ]+ +[^ ]+ +",
@@ -207,7 +206,7 @@ let nft_state rules_cg flush_chains =
 				let nft_err = nft_output_ext s in
 				raise (RuntimeFail (fmt "Failed to flush rule chains:%s" nft_err)) );
 		Hashtbl.iter replace_rule rules_cg in (* try to apply all initial rules *)
-	apply_init, apply, nft_free
+	nft_init (); apply_init, apply, nft_free
 
 
 let () =
@@ -218,8 +217,8 @@ let () =
 	let tail, tail_cleanup = tail_journal () in
 	let run_loop =
 		let rec run_loop_tail init =
-			(* Trying to bruteforce-reapply rule(s) here on any type of change in similar-looking cgroup.
-			 * cgroup/unit can be in a different tree or removed, so nft_apply might do delete or just nothing. *)
+			(* Trying to bruteforce-reapply rule(s) here on any type of change in same-name leaf unit.
+			 * cgroup/unit can be in a different tree or removed, so nft_apply might do delete/add or just nothing. *)
 			( try
 					if init then nft_apply_init ();
 					let jr = Stream.next tail in
