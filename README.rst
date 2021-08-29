@@ -126,12 +126,16 @@ This is a simple OCaml_ app with C bindings, which can be built using any modern
   Usage: ./scnpm [opts] [nft-configs ...]
   ...
 
-That should produce ~1.5M binary, linked against libsystemd (for journal access)
-and libnftables (to re-apply cgroupv2 nftables rules), which can be installed and
-copied between systems normally.
+That should produce ~1M binary, linked against libsystemd (for journal access)
+and libnftables (to re-apply cgroupv2 nftables rules), which can be installed
+and copied between systems normally.
 
-Journal is used as event source instead of dbus signals to be able to monitor
-state of all "systemd --user" unit instances as well as system ones.
+OCaml compiler is only needed to build the tool, not to run it.
+
+Journal is used as an event source instead of more conventional dbus signals to be
+able to monitor state of all "systemd --user" unit instances as well as system ones,
+which will be sent over multiple transient dbus instances, so much more difficult
+to reliably track otherwise.
 
 .. _OCaml: https://ocaml.org/
 
@@ -140,7 +144,60 @@ state of all "systemd --user" unit instances as well as system ones.
 Usage
 -----
 
-Not implemented yet.
+Tool is designed to parse special commented-out rules for it from the same
+nftables.conf as used for all other rules, for consistency
+(though of course they can be stored in any other file as well)::
+
+  ## Allow connections to/from vpn for system postfix.service
+  # postfix.service :: add rule inet filter vpn.whitelist \
+  #   socket cgroupv2 level 2 "system.slice/postfix.service" tcp dport 25 accept
+
+  ## Allow connections to/from vpn for a scope unit running under "systemd --user"
+  ## "systemd-run" can be used to easily start apps in custom scopes or slices
+  # app-mail.scope :: add rule inet filter vpn.whitelist socket cgroupv2 level 5 \
+  #   "user.slice/user-1000.slice/user@1000.service/app.slice/app-mail.scope" \
+  #   tcp dport {25, 143} accept
+
+  ## Only allow whitelisted apps to connect over "my-vpn" iface
+  add rule inet filter output oifname my-vpn jump vpn.whitelist
+  add rule inet filter output oifname my-vpn reject with icmpx type admin-prohibited
+
+  ## Only allow whitelisted apps to receive connections from "my-vpn" iface
+  add rule inet filter output iifname my-vpn jump vpn.whitelist
+  add rule inet filter output iifname my-vpn reject with icmpx type admin-prohibited
+
+  ## Note: instead of "reject" rules above, chain policy can be used when declaring it:
+  # add chain inet filter vpn.whitelist { policy drop; }
+
+Commented-out "add rule" lines would normally make this config fail to apply on
+boot, as those service/scope/slice cgroups won't exist yet at that point.
+
+Script will parse those from "<unit-to-watch> :: <rule>" comments instead, and
+try to apply them on start and whenever any kind of state-change happens to a
+unit with the name specified there.
+
+For example, when postfix.service is stopped/restarted with config above,
+corresponding vpn.whitelist rule will be removed and re-added, allowing access
+to a new cgroup which systemd will create for it after restart.
+
+| Command-line tool options: ``./scnpm --help``
+| To start it in verbose mode: ``./scnpm --flush --debug /etc/nftables.conf``
+
+``-f/--flush`` option there will purge ("flush") all chains mentioned in the
+rules that it will monitor/apply on start, so that leftover rules from any
+previous runs are removed, and can be replaced with more fine-grained manual
+removal if these are not dedicated chains used for such dynamic rules only.
+
+Running without ``-d/--debug`` should not normally produce any output, unless
+there are any (non-critical) warnings (e.g. a strange mismatch somewhere),
+code bugs or fatal errors.
+
+Starting the tool on boot should be scheduled after nftables.service,
+so that ``--flush`` option will be able to find all required chains.
+
+Syntax errors in nft rules are not currently detected and will be silenced,
+so check "nft list chain" or debug output when those are supposed to be
+enabled at least once.
 
 
 

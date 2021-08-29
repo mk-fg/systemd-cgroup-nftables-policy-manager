@@ -1,9 +1,9 @@
-LDLIBS = -lsystemd
+LDLIBS = -cclib -lsystemd -cclib -lnftables
 
 all: scnpm
 
 scnpm: scnpm.ml scnpm.ml.c
-	ocamlopt -o $@ -O2 unix.cmxa str.cmxa -cclib $(LDLIBS) $^
+	ocamlopt -o $@ -O2 str.cmxa $(LDLIBS) $^
 	strip $@
 
 clean:
