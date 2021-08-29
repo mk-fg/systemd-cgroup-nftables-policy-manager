@@ -178,12 +178,12 @@ to a new cgroup which systemd will create for it after restart.
 To start it in verbose mode: ``./scnpm --flush --debug /etc/nftables.conf``
 
 ``-f/--flush`` option will purge (flush) all chains mentioned in the rules
-that it will monitor/apply on tool start, so that leftover rules from any
+that will be monitored/applied on tool start, so that leftover rules from any
 previous runs are removed, and can be replaced with more fine-grained manual
 removal if these are not dedicated chains used for such dynamic rules only.
 
 Running without ``-d/--debug`` should not normally produce any output, unless
-there are some (non-critical) warnings (e.g. a strange mismatch somewhere),
+there are some (non-critical) warnings like unexpected mismatch or nft error,
 code bugs or fatal errors.
 
 Starting the tool on boot should be scheduled after nftables.service,
@@ -192,9 +192,18 @@ and will exit with an error otherwise.
 
 Multiple nft rules linked to same systemd unit(s) are allowed.
 
-Syntax errors in nft rules are not currently detected and will be silenced,
-so check "nft list chain" or debug output when those are supposed to be
-enabled at least once.
+Changes in parsed config files are not auto-detected, and only applied on
+tool restart, which can be done explicitly after changes, configured in
+nftables.service (e.g. via PropagatesReloadTo= and/or BindsTo=)
+or systemd.path unit monitoring state of such source configuration files.
+
+Syntax errors in nft rules should produce warnings when these are applied on
+tool start or changes, so should be hard to miss, but maybe do check "nft list chain"
+or debug output when rules are supposed to be enabled after conf changes anyway.
+
+To modify nftables rulesets, CAP_NET_ADMIN capability is requied, which can be
+passed via AmbientCapabilities= in systemd service (or similar option in capsh)
+in addition to SupplementaryGroups=systemd-journal to avoid running this as full root.
 
 
 

@@ -24,7 +24,7 @@ let () =
 			("--flush", Arg.Set cli_flush_chains,
 				t^"Flush nft chain(s) used in all rules on start, to cleanup any leftover ones" ^
 				t^" from previous run(s), as otherwise only rules added during runtime are replaced/removed.");
-			(* XXX: implement rate-limiting/delay options in tail_journal to batch similar events *)
+			(* XXX: add rate-limiting/delay options in tail_journal to batch similar events *)
 			(* ("-i", Arg.Set_float cli_update_interval, "seconds");
 			 * ("--interval", Arg.Set_float cli_update_interval, "seconds" ^
 			 * 	t^"Min interval between nft updates, measured from the last update." ^
@@ -69,8 +69,8 @@ external nft_set_dry_run : bool -> unit = "mlnft_set_dry_run"
 external nft_apply : string -> (string, string) result = "mlnft_apply"
 
 (* Misc minor helpers *)
-let debug_print line = if !cli_debug then prerr_endline line; flush stdout
-let warn line = if !cli_debug || not !cli_quiet then prerr_endline line; flush stdout
+let log_debug line = if !cli_debug then prerr_endline line; flush stdout
+let log_warn line = if !cli_debug || not !cli_quiet then prerr_endline line; flush stderr
 let fmt = Printf.sprintf
 exception RuntimeFail of string (* for multiline-formatted errors before exit *)
 
@@ -93,18 +93,18 @@ let tail_journal () =
 	let tail = (* infinite stream of journal_record *)
 		let tail_queue = Queue.create () in
 		let tail_parse () =
-			(* debug_print "journal :: parsing msg backlog"; *)
+			(* log_debug "journal :: parsing msg backlog"; *)
 			let rec tail_parse_iter () =
 				let jr = journal_read () in
-				(* debug_print (fmt "journal :: - msg: %s" jr.msg); *)
+				(* log_debug (fmt "journal :: - msg: %s" jr.msg); *)
 				Queue.add jr tail_queue;
 				tail_parse_iter () in
 			try tail_parse_iter ()
 			with End_of_file -> () in
 				(* let queue_len = Queue.length tail_queue in
-				 * debug_print (fmt "journal :: parser-done queue=%d" queue_len) in *)
+				 * log_debug (fmt "journal :: parser-done queue=%d" queue_len) in *)
 		let rec tail_parse_wait () =
-			(* debug_print "journal :: poll..."; *)
+			(* log_debug "journal :: poll..."; *)
 			let update = journal_wait journal_wait_us in
 			if update then tail_parse () else tail_parse_wait () in
 		let rec tail_iter n =
@@ -118,7 +118,7 @@ let tail_journal () =
  * 	let tail, tail_cleanup = tail_journal () in
  * 	let rec run_tail_loop () =
  * 		let jr = Stream.next tail in
- * 		debug_print (fmt "journal :: event u=%s uu=%s" jr.u jr.uu);
+ * 		log_debug (fmt "journal :: event u=%s uu=%s" jr.u jr.uu);
  * 		run_tail_loop () in
  * 	Fun.protect ~finally:tail_cleanup run_tail_loop *)
 
@@ -163,9 +163,10 @@ let parse_unit_rules nft_configs =
 let nft_state rules_cg flush_chains =
 	nft_init ();
 	let rules_nft = Hashtbl.create nft_table_size_hint in
-	let re_prefix, re_handle = Str.(
+	let re_prefix, re_handle, re_add_skip = Str.(
 		regexp "^[^ ]+ +[^ ]+ +[^ ]+ +",
-		regexp "^add rule .* # handle \\([0-9]+\\)\n" ) in
+		regexp "^add rule .* # handle \\([0-9]+\\)\n",
+		regexp "^Error: cgroupv2 path fails: No such file or directory\\b" ) in
 	let rule_prefix rule = if Str.string_match re_prefix rule 0
 		then Str.matched_string rule else raise (RuntimeFail "BUG - rule prefix mismatch") in
 	let nft_output_ext s =
@@ -176,19 +177,20 @@ let nft_state rules_cg flush_chains =
 			match nft_apply (fmt "delete rule %s handle %d" (rule_prefix rule) h)
 					with | Ok s -> () | Error s ->
 				let nft_err = nft_output_ext s in
-				warn (fmt "nft :: failed to remove tracked rule [ %s %d ]: %s%s" cg h rule nft_err) );
+				log_warn (fmt "nft :: failed to remove tracked rule [ %s %d ]: %s%s" cg h rule nft_err) );
 		Hashtbl.remove rules_nft rule;
 		( match nft_apply (fmt "add rule %s" rule) with
 			| Error s -> (* rules are expected to be rejected here - racy, no add/remove diff, etc *)
 				let nft_err = nft_output_ext s in
-				(* XXX: detect syntax errors here *)
-				debug_print (fmt "nft :: add-rule skipped :: %s%s" rule nft_err)
+				if Str.string_match re_add_skip s 0
+					then log_debug (fmt "nft :: add-rule skipped :: %s%s" rule nft_err)
+					else log_warn (fmt "nft :: add-rule failed with non-cgroupv2-path error :: %s%s" rule nft_err)
 			| Ok s ->
 				if Str.string_match re_handle s 0
 				then
 					let h = Str.matched_group 1 s |> int_of_string in
 					Hashtbl.replace rules_nft rule h;
-					debug_print (fmt "nft :: rule updated [ %s %d ]: %s" cg h rule)
+					log_debug (fmt "nft :: rule updated [ %s %d ]: %s" cg h rule)
 				else
 					let nft_echo = nft_output_ext s in
 					raise (RuntimeFail (fmt "BUG - failed to \
@@ -199,7 +201,7 @@ let nft_state rules_cg flush_chains =
 		if flush_chains then Hashtbl.iter (fun cg rule ->
 			Hashtbl.replace flush_map (rule_prefix rule) ()) rules_cg;
 		( match Hashtbl.to_seq_keys flush_map |> Seq.fold_left (fun a s ->
-				debug_print (fmt "nft :: flush chain %s" s);
+				log_debug (fmt "nft :: flush chain %s" s);
 				a ^ "\n" ^ "flush chain " ^ s ) "" |> nft_apply with
 			| Ok s -> () | Error s ->
 				let nft_err = nft_output_ext s in
@@ -210,8 +212,8 @@ let nft_state rules_cg flush_chains =
 
 let () =
 	let unit_rules = parse_unit_rules !cli_nft_configs in
-	debug_print (fmt "config :: loaded rules: %d" (Hashtbl.length unit_rules));
-	(* Hashtbl.iter (fun k v -> debug_print (fmt "config :: [ %s ] rule %s" k v)) unit_rules; *)
+	log_debug (fmt "config :: loaded rules: %d" (Hashtbl.length unit_rules));
+	(* Hashtbl.iter (fun k v -> log_debug (fmt "config :: [ %s ] rule %s" k v)) unit_rules; *)
 	let nft_apply_init, nft_apply, nft_free = nft_state unit_rules !cli_flush_chains in
 	let tail, tail_cleanup = tail_journal () in
 	let run_loop =
@@ -221,7 +223,7 @@ let () =
 			( try
 					if init then nft_apply_init ();
 					let jr = Stream.next tail in
-					debug_print (fmt "journal :: event u=%s uu=%s" jr.u jr.uu);
+					log_debug (fmt "journal :: event u=%s uu=%s" jr.u jr.uu);
 					nft_apply (if jr.u = "" then jr.uu else jr.u)
 				with RuntimeFail s ->
 					prerr_endline (fmt "FATAL ERROR - %s" s);
