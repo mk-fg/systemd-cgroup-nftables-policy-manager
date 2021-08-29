@@ -35,9 +35,9 @@ But when trying to put this into /etc/nftables.conf, it will fail to load on boo
 (same as similar iptables rules), as that "myapp.service" cgroup with a long
 path does not exist yet.
 
-Both rules use xt_cgroup kernel module that - when looking at the packet -
-actually matches cgroup ID, and not the path string, and does not update those
-IDs dynamically when cgroups are created/removed in any way.
+Both nft/ipt rules use xt_cgroup kernel module that - when looking at the packet -
+actually matches numeric cgroup ID, and not the path string, and does not update
+those IDs dynamically when cgroups are created/removed in any way.
 
 This means that:
 
@@ -51,19 +51,19 @@ This means that:
   This is because new cgroup gets a new unique ID, which can't be present in any
   pre-existing netfilter tables, so none of the rules will match it.
 
-So basically such rules in a global policy only work for cgroups that are
-created early on boot and never removed after that.
+So basically such rules in a system-wide policy-config only work for cgroups
+that are created early on boot and never removed after that.
 
 This is not what happens with most systemd services and slices, restarting which
-will also re-create cgroups, and which are usually started way after system-wide
+will also re-create cgroups, and which are usually started way after system
 firewalls are initialized (and often can't be started on boot - e.g. user units).
 
 
-Solution
-~~~~~~~~
+Solution:
+~~~~~~~~~
 
-Monitor cgroup creation/removal events and (re-)apply any relevant rules to
-these dynamically.
+Monitor cgroup (or systemd unit) creation/removal events and (re-)apply any
+relevant rules to these dynamically.
 
 This is `how "socket cgroupv2" matcher in nftables is intended to work`_::
 
@@ -80,38 +80,33 @@ start/stop events via journal (using libsystemd) and updating any relevant
 rules on events from there (using libnftables).
 
 It was proposed for systemd itself to do something like that in `systemd#7327`_,
-but unlikely to be implemented, as (at least so far) systemd does not manage
+but is unlikely to be implemented, as (at least so far) systemd does not manage
 netfilter firewall configurations.
 
-Note that systemd has built-in network filtering via eBPF though, which can be
-used as an alternative to this kind of system-wide policy approach in at least
-some cases.
+Note that systemd has built-in network filtering via eBPFs attached to cgroups
+(via IPAddressAllow/Deny=, BPFProgram=, IPEgressFilterPath=, and similar options)
+which can be used as an alternative to this kind of system-wide policy approach
+for at least some use-cases, though might be more difficult to combine and maintain
+in multiple places, with more lax permissions, and with limited matching capabilities.
 
 .. _how "socket cgroupv2" matcher in nftables is intended to work: https://patchwork.ozlabs.org/project/netfilter-devel/patch/1479114761-19534-1-git-send-email-pablo@netfilter.org/
 .. _systemd#7327: https://github.com/systemd/systemd/issues/7327
 
 
-Intended use-case
-~~~~~~~~~~~~~~~~~
+Intended use-case:
+~~~~~~~~~~~~~~~~~~
 
 Defining system-wide policy to whitelist outgoing connections from specific
 systemd units (can be services/apps, slices of those, or ad-hoc scopes)
 in an easy and relatively foolproof way.
 
 I.e. if a desktop system is connected to some kind of "intranet" VPN, there's
-no reason for random and insecure apps like a web browsers or games to be able
-to connect to anything there, and that is trivial to block via single firewall
-rule.
+no reason for random and insecure apps like web browsers or games to be able
+to connect to anything there (think fetch() JS call from any site you visit),
+and that is trivial to block with a single firewall rule.
 
-This tool manages a whitelist of systemd units that should have access there
-(and hence are allowed to bypass such rule) on top of that.
-
-This is hard to implement with systemd's resource-control eBPF restrictions,
-as they do not cooperate with each other to create exceptions from child cgroups,
-but maybe possible with custom eBPFs that mark packets, though these also
-require root (or CAP_BPF) to attach, so extra-tricky to use from transient and
-numerous lower-level/leaf units under "systemd --user", which tend to be where
-such stuff is most needed (i.e. your terminal or whatever client apps).
+This tool is intended to manage a whitelist of rules for systemd units that
+should have access there (and hence are allowed to bypass such rule) on top of that.
 
 
 
@@ -127,15 +122,15 @@ This is a simple OCaml_ app with C bindings, which can be built using any modern
   ...
 
 That should produce ~1M binary, linked against libsystemd (for journal access)
-and libnftables (to re-apply cgroupv2 nftables rules), which can be installed
+and libnftables (to re-apply cgroupv2 nftables rules), which can then be installed
 and copied between systems normally.
 
 OCaml compiler is only needed to build the tool, not to run it.
 
 Journal is used as an event source instead of more conventional dbus signals to be
 able to monitor state of all "systemd --user" unit instances as well as system ones,
-which will be sent over multiple transient dbus instances, so much more difficult
-to reliably track otherwise.
+which will be sent over multiple transient dbus'es, so much more difficult to
+reliably track otherwise.
 
 .. _OCaml: https://ocaml.org/
 
@@ -145,8 +140,8 @@ Usage
 -----
 
 Tool is designed to parse special commented-out rules for it from the same
-nftables.conf as used for all other rules, for consistency
-(though of course they can be stored in any other file as well)::
+nftables.conf as used with the rest of ruleset, for consistency
+(though of course they can be stored in any other file(s) as well)::
 
   ## Allow connections to/from vpn for system postfix.service
   # postfix.service :: add rule inet filter vpn.whitelist \
@@ -170,30 +165,32 @@ nftables.conf as used for all other rules, for consistency
   # add chain inet filter vpn.whitelist { policy drop; }
 
 Commented-out "add rule" lines would normally make this config fail to apply on
-boot, as those service/scope/slice cgroups won't exist yet at that point.
+boot, as those service/scope/slice cgroups won't exist yet at that point in time.
 
-Script will parse those from "<unit-to-watch> :: <rule>" comments instead, and
-try to apply them on start and whenever any kind of state-change happens to a
-unit with the name specified there.
+Script will parse those "<unit-to-watch> :: <rule>" comments, and try to apply
+rules from them on start and whenever any kind of state-change happens to a unit
+with the name specified there.
 
-For example, when postfix.service is stopped/restarted with config above,
+For example, when postfix.service is stopped/restarted with the config above,
 corresponding vpn.whitelist rule will be removed and re-added, allowing access
 to a new cgroup which systemd will create for it after restart.
 
-| Command-line tool options: ``./scnpm --help``
-| To start it in verbose mode: ``./scnpm --flush --debug /etc/nftables.conf``
+To start it in verbose mode: ``./scnpm --flush --debug /etc/nftables.conf``
 
-``-f/--flush`` option there will purge ("flush") all chains mentioned in the
-rules that it will monitor/apply on start, so that leftover rules from any
+``-f/--flush`` option will purge (flush) all chains mentioned in the rules
+that it will monitor/apply on tool start, so that leftover rules from any
 previous runs are removed, and can be replaced with more fine-grained manual
 removal if these are not dedicated chains used for such dynamic rules only.
 
 Running without ``-d/--debug`` should not normally produce any output, unless
-there are any (non-critical) warnings (e.g. a strange mismatch somewhere),
+there are some (non-critical) warnings (e.g. a strange mismatch somewhere),
 code bugs or fatal errors.
 
 Starting the tool on boot should be scheduled after nftables.service,
-so that ``--flush`` option will be able to find all required chains.
+so that ``--flush`` option will be able to find all required chains,
+and will exit with an error otherwise.
+
+Multiple nft rules linked to same systemd unit(s) are allowed.
 
 Syntax errors in nft rules are not currently detected and will be silenced,
 so check "nft list chain" or debug output when those are supposed to be
