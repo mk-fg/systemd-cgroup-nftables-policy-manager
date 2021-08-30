@@ -65,7 +65,6 @@ external journal_match_flush : unit -> unit = "mlj_match_flush"
 let nft_table_size_hint = 8
 external nft_init : unit -> unit = "mlnft_init"
 external nft_free : unit -> unit = "mlnft_free"
-external nft_set_dry_run : bool -> unit = "mlnft_set_dry_run"
 external nft_apply : string -> (string, string) result = "mlnft_apply"
 
 (* Misc minor helpers *)

@@ -144,12 +144,6 @@ value mlnft_free() {
 	CAMLreturn(Val_unit);
 }
 
-value mlnft_set_dry_run(value dry) {
-	CAMLparam1(dry);
-	nft_ctx_set_dry_run(mlnft, (bool) Bool_val(dry));
-	CAMLreturn(Val_unit);
-}
-
 value mlnft_apply(value v_rules) {
 	CAMLparam1(v_rules);
 	char *rules = String_val(v_rules);
