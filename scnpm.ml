@@ -182,7 +182,7 @@ let nft_state rules_cg flush_chains =
 					raise (RuntimeFail (fmt "BUG - failed to \
 						parse rule handle from nft echo:%s" nft_echo)) ) in
 	let apply cg = Hashtbl.find_all rules_cg cg |> List.iter (replace_rule cg) in
-	let apply_init ~quiet =
+	let apply_init () =
 		let flush_map = Hashtbl.create 2 in
 		if flush_chains then Hashtbl.iter (fun cg rule ->
 			Hashtbl.replace flush_map (rule_prefix rule) ()) rules_cg;
@@ -192,7 +192,7 @@ let nft_state rules_cg flush_chains =
 			| Ok s -> () | Error s ->
 				let nft_err = nft_output_ext s in
 				raise (RuntimeFail (fmt "Failed to flush rule chains:%s" nft_err)) );
-		Hashtbl.iter (replace_rule ~quiet) rules_cg in (* try to apply all initial rules *)
+		Hashtbl.iter (replace_rule ~quiet:true) rules_cg in (* try to apply all initial rules *)
 	nft_init (); apply_init, apply, nft_free
 
 
@@ -207,11 +207,11 @@ let () =
 			(* Trying to bruteforce-reapply rule(s) here on any type of change in same-name leaf unit.
 			 * cgroup/unit can be in a different tree or removed, so nft_apply might do delete/add or just nothing. *)
 			( try
-					if init then nft_apply_init ~quiet:false;
+					if init then nft_apply_init ();
 					let jr = Stream.next tail in
 					log_debug (fmt "journal :: event u=%s uu=%s" jr.u jr.uu);
 					if List.exists (String.equal jr.u) !cli_reload_units
-						then nft_apply_init ~quiet:true
+						then nft_apply_init ()
 						else nft_apply (if jr.u = "" then jr.uu else jr.u)
 				with RuntimeFail s ->
 					prerr_endline (fmt "FATAL ERROR - %s" s);
