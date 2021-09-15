@@ -89,7 +89,7 @@ which can be used as an alternative to this kind of system-wide policy approach
 for at least some use-cases, though might be more difficult to combine and maintain
 in multiple places, with more lax permissions, and with limited matching capabilities.
 
-.. _how "socket cgroupv2" matcher in nftables is intended to work: https://patchwork.ozlabs.org/project/netfilter-devel/patch/1479114761-19534-1-git-send-email-pablo@netfilter.org/
+.. _how "socket cgroupv2" matcher in nftables is intended to work: https://patchwork.ozlabs.org/project/netfilter-devel/patch/1479114761-19534-1-git-send-email-pablo@netfilter.org/#1511797
 .. _systemd#7327: https://github.com/systemd/systemd/issues/7327
 
 
@@ -157,7 +157,7 @@ nftables.conf as used with the rest of ruleset, for consistency
 
   ## Only allow whitelisted apps to connect over "my-vpn" iface
   add rule inet filter output oifname my-vpn jump vpn.whitelist
-  add rule inet filter output oifname my-vpn reject with icmpx type admin-prohibited
+  add rule inet filter output oifname my-vpn drop
 
 Commented-out "add rule" lines would normally make this config fail to apply on
 boot, as those service/scope/slice cgroups won't exist yet at that point in time.
@@ -191,6 +191,10 @@ Changes in parsed config files are not auto-detected, and only applied on
 tool restart, which can be done explicitly after changes, configured in
 nftables.service (e.g. via PropagatesReloadTo= and/or BindsTo=)
 or systemd.path unit monitoring state of such source configuration files.
+
+To handle automated nftables-flush events without actual config changes
+(like network auto-restart on laptop wakeup), there's ``-u/--reload-with-unit``
+option to flush/reapply all rules when such system unit restarts.
 
 Syntax errors in nft rules should produce warnings when these are applied on
 tool start or changes, so should be hard to miss, but maybe do check "nft list chain"

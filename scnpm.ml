@@ -10,12 +10,12 @@
  *   % ./scnpm --flush --debug /etc/nftables.conf
  *)
 
-let cli_debug = ref false
-let cli_quiet = ref false
-(* let cli_update_interval = ref 1.0
- * let cli_update_delay = ref 0.0 *)
 let cli_flush_chains = ref false
+let cli_quiet = ref false
+let cli_debug = ref false
 let cli_nft_configs = ref []
+let cli_reload_units = ref []
+let cli_reload_units_add = (fun u -> cli_reload_units := u :: !cli_reload_units)
 
 let () =
 	let t = "\n      " in
@@ -24,17 +24,12 @@ let () =
 			("--flush", Arg.Set cli_flush_chains,
 				t^"Flush nft chain(s) used in all rules on start, to cleanup any leftover ones" ^
 				t^" from previous run(s), as otherwise only rules added during runtime are replaced/removed.");
-			(* XXX: add rate-limiting/delay options in tail_journal to batch similar events *)
-			(* ("-i", Arg.Set_float cli_update_interval, "seconds");
-			 * ("--interval", Arg.Set_float cli_update_interval, "seconds" ^
-			 * 	t^"Min interval between nft updates, measured from the last update." ^
-			 * 	t^"Can be used to batch quick changes or filter-out too transient ones." ^
-			 * 		" Default: " ^ (string_of_float !cli_update_interval));
-			 * ("-w", Arg.Set_float cli_update_delay, "seconds");
-			 * ("--wait-delay", Arg.Set_float cli_update_delay, "seconds" ^
-			 * 	t^"Fixed delay before applying new nft updates, which can be used to avoid" ^
-			 * 	t^"changing rules back-and-forth for transient unit state changes." ^
-			 * 		" Default: " ^ (string_of_float !cli_update_delay)); *)
+			("-u", Arg.String cli_reload_units_add, "unit-name");
+			("--reload-with-unit", Arg.String cli_reload_units_add, "unit-name" ^
+				t^"Reload rules (and flush chain[s] with -f/--flush) on specified system unit state changes." ^
+				t^"Can be useful to pass something like nftables.service with this option," ^
+				t^" as restarting that usually flushes nft rulesets and all dynamic rules in there." ^
+				t^"Option can be used multiple times to reload for any of the specified units.");
 			("-q", Arg.Set cli_quiet, " ");
 			("--quiet", Arg.Set cli_quiet, "-- Suppress non-fatal logging.");
 			("-d", Arg.Set cli_debug, " ");
@@ -47,6 +42,7 @@ let () =
 
 (* journal_record and journal_fields should have same field count/order *)
 (* Can also check/use JOB_TYPE=start/stop/restart/etc *)
+(* Initially thought that I might need more props than just unit name(s) here... *)
 type journal_record = {u: string; uu: string} [@@boxed]
 let journal_fields = ["UNIT"; "USER_UNIT"]
 let journal_wait_us = 3600_000_000 (* don't need a limit for local journal *)
@@ -113,14 +109,6 @@ let tail_journal () =
 
 	init (); tail, cleanup
 
-(* let run () =
- * 	let tail, tail_cleanup = tail_journal () in
- * 	let rec run_tail_loop () =
- * 		let jr = Stream.next tail in
- * 		log_debug (fmt "journal :: event u=%s uu=%s" jr.u jr.uu);
- * 		run_tail_loop () in
- * 	Fun.protect ~finally:tail_cleanup run_tail_loop *)
-
 
 exception ParseFail of string
 
@@ -170,10 +158,10 @@ let nft_state rules_cg flush_chains =
 	let nft_output_ext s =
 		let s = String.trim s in if s = "" then s else "\n" ^ String.( split_on_char '\n' s |>
 			List.filter_map (fun s -> if s = "" then None else Some ("  " ^ s)) |> concat "\n" ) in
-	let replace_rule cg rule =
+	let replace_rule ?(quiet = false) cg rule =
 		( match Hashtbl.find_opt rules_nft rule with | None -> () | Some h ->
 			match nft_apply (fmt "delete rule %s handle %d" (rule_prefix rule) h)
-					with | Ok s -> () | Error s ->
+					with | Ok s -> () | Error s -> if not quiet then
 				let nft_err = nft_output_ext s in
 				log_warn (fmt "nft :: failed to remove tracked rule [ %s %d ]: %s%s" cg h rule nft_err) );
 		Hashtbl.remove rules_nft rule;
@@ -194,7 +182,7 @@ let nft_state rules_cg flush_chains =
 					raise (RuntimeFail (fmt "BUG - failed to \
 						parse rule handle from nft echo:%s" nft_echo)) ) in
 	let apply cg = Hashtbl.find_all rules_cg cg |> List.iter (replace_rule cg) in
-	let apply_init () =
+	let apply_init ~quiet =
 		let flush_map = Hashtbl.create 2 in
 		if flush_chains then Hashtbl.iter (fun cg rule ->
 			Hashtbl.replace flush_map (rule_prefix rule) ()) rules_cg;
@@ -204,7 +192,7 @@ let nft_state rules_cg flush_chains =
 			| Ok s -> () | Error s ->
 				let nft_err = nft_output_ext s in
 				raise (RuntimeFail (fmt "Failed to flush rule chains:%s" nft_err)) );
-		Hashtbl.iter replace_rule rules_cg in (* try to apply all initial rules *)
+		Hashtbl.iter (replace_rule ~quiet) rules_cg in (* try to apply all initial rules *)
 	nft_init (); apply_init, apply, nft_free
 
 
@@ -219,10 +207,12 @@ let () =
 			(* Trying to bruteforce-reapply rule(s) here on any type of change in same-name leaf unit.
 			 * cgroup/unit can be in a different tree or removed, so nft_apply might do delete/add or just nothing. *)
 			( try
-					if init then nft_apply_init ();
+					if init then nft_apply_init ~quiet:false;
 					let jr = Stream.next tail in
 					log_debug (fmt "journal :: event u=%s uu=%s" jr.u jr.uu);
-					nft_apply (if jr.u = "" then jr.uu else jr.u)
+					if List.exists (String.equal jr.u) !cli_reload_units
+						then nft_apply_init ~quiet:true
+						else nft_apply (if jr.u = "" then jr.uu else jr.u)
 				with RuntimeFail s ->
 					prerr_endline (fmt "FATAL ERROR - %s" s);
 					if Printexc.backtrace_status () then Printexc.print_backtrace stderr
