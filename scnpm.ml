@@ -117,7 +117,7 @@ let parse_unit_rules nft_configs =
 	let re_start, re_cont, re_rule = Str.(
 		regexp "^#+ *\\([^ ]+\\.[a-zA-Z]+\\) +:: +\\(add +\\(rule +\\)?\\)?\\(.*\\)$",
 		regexp "^#+ \\(.*\\)$", regexp "\\([^ ]+ +[^ ]+ +[^ ]+\\) +\\(.+\\)" ) in
-	let rec parse_config fn =
+	let parse_config fn =
 		let src = open_in fn in
 		let rec read_line cg rule =
 			let cg, rule_start =
@@ -156,12 +156,13 @@ let nft_state rules_cg flush_chains =
 	let rule_prefix rule = if Str.string_match re_prefix rule 0
 		then Str.matched_string rule else raise (RuntimeFail "BUG - rule prefix mismatch") in
 	let nft_output_ext s =
-		let s = String.trim s in if s = "" then s else "\n" ^ String.( split_on_char '\n' s |>
+		let s = String.trim s in
+		if s = "" then s else "\n" ^ String.( split_on_char '\n' s |>
 			List.filter_map (fun s -> if s = "" then None else Some ("  " ^ s)) |> concat "\n" ) in
-	let replace_rule ?(quiet = false) cg rule =
+	let replace_rule cg rule =
 		( match Hashtbl.find_opt rules_nft rule with | None -> () | Some h ->
 			match nft_apply (fmt "delete rule %s handle %d" (rule_prefix rule) h)
-					with | Ok s -> () | Error s -> if not quiet then
+					with | Ok s -> () | Error s ->
 				let nft_err = nft_output_ext s in
 				log_warn (fmt "nft :: failed to remove tracked rule [ %s %d ]: %s%s" cg h rule nft_err) );
 		Hashtbl.remove rules_nft rule;
@@ -192,7 +193,8 @@ let nft_state rules_cg flush_chains =
 			| Ok s -> () | Error s ->
 				let nft_err = nft_output_ext s in
 				raise (RuntimeFail (fmt "Failed to flush rule chains:%s" nft_err)) );
-		Hashtbl.iter (replace_rule ~quiet:true) rules_cg in (* try to apply all initial rules *)
+		Hashtbl.clear rules_nft; (* to avoid removing unrelated rules after e.g. nftables restart *)
+		Hashtbl.iter replace_rule rules_cg in (* try to apply all initial rules *)
 	nft_init (); apply_init, apply, nft_free
 
 
