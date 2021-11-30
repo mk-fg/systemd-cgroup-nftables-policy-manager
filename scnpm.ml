@@ -151,7 +151,7 @@ let nft_state rules_cg flush_chains =
 	let rules_nft = Hashtbl.create nft_table_size_hint in
 	let re_prefix, re_handle, re_add_skip = Str.(
 		regexp "^[^ ]+ +[^ ]+ +[^ ]+ +",
-		regexp "^add rule .* # handle \\([0-9]+\\)\n",
+		regexp "^\\(add\\|insert\\) rule .* # handle \\([0-9]+\\)\n",
 		regexp "^Error: cgroupv2 path fails: No such file or directory\\b" ) in
 	let rule_prefix rule = if Str.string_match re_prefix rule 0
 		then Str.matched_string rule else raise (RuntimeFail "BUG - rule prefix mismatch") in
@@ -175,7 +175,7 @@ let nft_state rules_cg flush_chains =
 			| Ok s ->
 				if Str.string_match re_handle s 0
 				then
-					let h = Str.matched_group 1 s |> int_of_string in
+					let h = Str.matched_group 2 s |> int_of_string in
 					Hashtbl.replace rules_nft rule h;
 					log_debug (fmt "nft :: rule updated [ %s %d ]: %s" cg h rule)
 				else
