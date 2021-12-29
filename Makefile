@@ -1,4 +1,4 @@
-LDLIBS = -cclib -lsystemd -cclib -lnftables
+LDLIBS = -cclib -lsystemd -cclib -lnftables -ccopt -Wl,--no-as-needed
 
 all: scnpm
 

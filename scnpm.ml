@@ -2,12 +2,14 @@
  *
  * Build with:
  *   % ocamlopt -o scnpm -O2 str.cmxa \
- *       -cclib -lsystemd -cclib -lnftables scnpm.ml scnpm.ml.c
+ *      -cclib -lsystemd -cclib -lnftables \
+ *      -ccopt -Wl,--no-as-needed scnpm.ml scnpm.ml.c
  *   % strip scnpm
  *
  * Usage:
  *   % ./scnpm --help
  *   % ./scnpm --flush --debug /etc/nftables.conf
+ * Debug: OCAMLRUNPARAM=b ./scnpm --debug ...
  *)
 
 let cli_flush_chains = ref false
