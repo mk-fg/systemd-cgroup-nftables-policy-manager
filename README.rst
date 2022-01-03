@@ -117,7 +117,7 @@ This is a small OCaml_ cli app with C bindings, which can be built using any
 modern (4.10+) ocamlopt compiler and the usual make::
 
   % make
-  % scnpm --help
+  % ./scnpm --help
   Usage: ./scnpm [opts] [nft-configs ...]
   ...
 
