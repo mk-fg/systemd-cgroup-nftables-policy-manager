@@ -4,6 +4,12 @@ systemd cgroup (v2) nftables policy manager
 .. contents::
   :backlinks: none
 
+This repository URLs:
+
+- https://github.com/mk-fg/systemd-cgroup-nftables-policy-manager
+- https://codeberg.org/mk-fg/systemd-cgroup-nftables-policy-manager
+- https://fraggod.net/code/git/systemd-cgroup-nftables-policy-manager
+
 
 Description
 -----------
