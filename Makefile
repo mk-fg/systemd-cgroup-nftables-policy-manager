@@ -3,7 +3,7 @@ LDLIBS = -cclib -lsystemd -cclib -lnftables -ccopt -Wl,--no-as-needed
 all: scnpm
 
 scnpm: scnpm.ml scnpm.ml.c
-	ocamlopt -o $@ -O2 str.cmxa $(LDLIBS) $^
+	ocamlopt -o $@ -O2 str.cmxa -I +str $(LDLIBS) $^
 	strip $@
 
 clean:

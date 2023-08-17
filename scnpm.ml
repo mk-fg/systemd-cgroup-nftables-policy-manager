@@ -1,7 +1,7 @@
 (* Systemd cgroup (v2) nftables policy manager tool
  *
  * Build with:
- *   % ocamlopt -o scnpm -O2 str.cmxa \
+ *   % ocamlopt -o scnpm -O2 str.cmxa -I +str \
  *      -cclib -lsystemd -cclib -lnftables \
  *      -ccopt -Wl,--no-as-needed scnpm.ml scnpm.ml.c
  *   % strip scnpm
@@ -104,10 +104,10 @@ let tail_journal () =
 			(* log_debug "journal :: poll..."; *)
 			let update = journal_wait journal_wait_us in
 			if update then tail_parse () else tail_parse_wait () in
-		let rec tail_iter n =
-			try Queue.take tail_queue |> Option.some
-			with Queue.Empty -> tail_parse_wait (); tail_iter n in
-		Stream.from tail_iter in
+		let rec tail_iter () =
+			try Queue.take tail_queue
+			with Queue.Empty -> tail_parse_wait (); tail_iter () in
+		tail_iter in
 
 	init (); tail, cleanup
 
@@ -205,14 +205,14 @@ let () =
 	log_debug (fmt "config :: loaded rules: %d" (Hashtbl.length unit_rules));
 	(* Hashtbl.iter (fun k v -> log_debug (fmt "config :: [ %s ] rule %s" k v)) unit_rules; *)
 	let nft_apply_init, nft_apply, nft_free = nft_state unit_rules !cli_flush_chains in
-	let tail, tail_cleanup = tail_journal () in
+	let tail_iter, tail_cleanup = tail_journal () in
 	let run_loop =
 		let rec run_loop_tail init =
 			(* Trying to bruteforce-reapply rule(s) here on any type of change in same-name leaf unit.
 			 * cgroup/unit can be in a different tree or removed, so nft_apply might do delete/add or just nothing. *)
 			( try
 					if init then nft_apply_init ();
-					let jr = Stream.next tail in
+					let jr = tail_iter () in
 					log_debug (fmt "journal :: event u=%s uu=%s" jr.u jr.uu);
 					if List.exists (String.equal jr.u) !cli_reload_units
 						then nft_apply_init ()
