@@ -1,12 +1,10 @@
-LDLIBS = -cclib -lsystemd -cclib -lnftables -ccopt -Wl,--no-as-needed
-
 all: scnpm
 
-scnpm: scnpm.ml scnpm.ml.c
-	ocamlopt -o $@ -O2 str.cmxa -I +str $(LDLIBS) $^
+scnpm: scnpm.nim
+	nim c -d:release --opt:size $<
 	strip $@
 
 clean:
-	rm -f scnpm scnpm.cmi scnpm.cmx scnpm.ml.o scnpm.o
+	rm -f scnpm
 
 .SUFFIXES: # to disable built-in rules for %.c and such

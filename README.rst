@@ -95,7 +95,8 @@ which can be used as an alternative to this kind of system-wide policy approach
 for at least some use-cases, though might be more difficult to combine and maintain
 in multiple places, with more lax permissions, and with limited matching capabilities.
 
-.. _how "socket cgroupv2" matcher in nftables is intended to work: https://patchwork.ozlabs.org/project/netfilter-devel/patch/1479114761-19534-1-git-send-email-pablo@netfilter.org/#1511797
+.. _how "socket cgroupv2" matcher in nftables is intended to work:
+  https://patchwork.ozlabs.org/project/netfilter-devel/patch/1479114761-19534-1-git-send-email-pablo@netfilter.org/#1511797
 .. _systemd#7327: https://github.com/systemd/systemd/issues/7327
 
 
@@ -119,18 +120,20 @@ that should have access there, and hence are allowed to bypass such rule.
 Build / Install
 ---------------
 
-This is a small OCaml_ cli app with C bindings, which can be built using any
-modern (4.10+) ocamlopt compiler and the usual make::
+This is a small Nim_ command-line app, which can be built using any
+modern Nim compiler, e.g. using included Makefile::
 
   % make
   % ./scnpm --help
   Usage: ./scnpm [opts] [nft-configs ...]
   ...
 
-That should produce ~1M binary, linked against libsystemd (for journal access)
+(or use ``nim c -d:release --opt:size scnpm.nim && strip scnpm`` without make)
+
+That should produce ~150K binary, linked against libsystemd (for journal access)
 and libnftables (to re-apply cgroupv2 nftables rules), which can then be installed
 and copied between systems normally.
-OCaml compiler is only needed to build the tool, not to run it.
+Nim compiler is only needed to build the tool, not to run it.
 
 scnpm.service_ systemd unit file can be used to auto-start it on boot.
 
@@ -139,7 +142,7 @@ be able to monitor state changes of units under all "systemd --user" instances
 as well as system ones, which are sent through multiple transient dbus brokers,
 so much more difficult to reliably track there.
 
-.. _OCaml: https://ocaml.org/
+.. _Nim: https://nim-lang.org/
 .. _scnpm.service: scnpm.service
 
 
@@ -226,8 +229,6 @@ Links
   Might conflict with current upstream nftables implementation due to "cgroupv2"
   keyword used there as well.
 
-  .. _helsinki-systems/nft_cgroupv2: https://github.com/helsinki-systems/nft_cgroupv2/
-
 - Systemd RFE-7327 about this sort of thing: https://github.com/systemd/systemd/issues/7327
 
 - `Upstreamed "netfilter: nft_socket: add support for cgroupsv2" patch
@@ -237,3 +238,9 @@ Links
 - `"netfilter: implement xt_cgroup cgroup2 path match" patch
   <https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=c38c4597>`_
   from linux-4.5.
+
+- Earlier version of this tool was written in OCaml_, and can be last found in `commit
+  048a8128 <https://github.com/mk-fg/systemd-cgroup-nftables-policy-manager/tree/048a8128>`_.
+
+.. _helsinki-systems/nft_cgroupv2: https://github.com/helsinki-systems/nft_cgroupv2/
+.. _OCaml: https://ocaml.org/
