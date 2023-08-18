@@ -246,14 +246,13 @@ proc main_help(err="") =
 			If multiple events for same unit are detected,
 				subsequent ones are queued to apply after this interval.
 
-		-d / --debug -- Verbose operation mode. Overrides -q/--quiet.
+		-d / --debug -- Verbose operation mode.
 		""")
 	quit 0
 
 proc main(argv: seq[string]) =
 	var
 		opt_flush = false
-		opt_quiet = false
 		opt_debug = false
 		opt_cooldown = initDuration(seconds=1)
 		opt_reload_with_unit = newSeq[string]()
@@ -277,7 +276,6 @@ proc main(argv: seq[string]) =
 			of cmdShortOption, cmdLongOption:
 				if opt in ["h", "help"]: main_help()
 				elif opt in ["f", "flush"]: opt_flush = true
-				elif opt in ["q", "quiet"]: opt_quiet = true
 				elif opt in ["d", "debug"]: opt_debug = true
 				elif val == "": opt_empty_check(); opt_last = opt
 				else: opt_set(opt, val)
@@ -288,7 +286,7 @@ proc main(argv: seq[string]) =
 
 	var logger = newConsoleLogger(
 		fmtStr="$levelid $datetime :: ", useStderr=true,
-		levelThreshold=if opt_debug: lvlAll elif opt_quiet: lvlWarn else: lvlInfo )
+		levelThreshold=if opt_debug: lvlAll else: lvlInfo )
 	addHandler(logger)
 
 	debug("Processing configuration...")
