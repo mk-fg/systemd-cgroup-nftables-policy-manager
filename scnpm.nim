@@ -232,8 +232,8 @@ proc main_help(err="") =
 			rules for systemd-managed per-unit cgroups (slices, services, scopes).
 
 		-f / --flush
-			Flush nft chain(s) used in all rules on start, to cleanup any leftover ones from
-				previous run(s), as otherwise only rules added during runtime are replaced/removed.
+			Flush nft chain(s) used in all parsed cgroup-rules on start, to cleanup leftovers
+				from previous run(s), as otherwise only rules added at runtime get replaced/removed.
 
 		-u / --reload-with-unit unit-name
 			Reload rules (and flush chain[s] with -f/--flush) on system unit state changes.
@@ -307,11 +307,6 @@ proc main(argv: seq[string]) =
 	defer: sq.close()
 	sq.setup_filters()
 
-	if opt_flush:
-		debug("Flushing all affected nftables chains...")
-		nft.flush_rule_chains(rules.values.toSeq.concat)
-
-	debug("Starting main loop...")
 	var
 		ts_now: MonoTime
 		ts_wake: MonoTime
@@ -319,9 +314,10 @@ proc main(argv: seq[string]) =
 		unit: string
 		rule_queue = initTable[string, tuple[ts: MonoTime, apply: bool]]()
 		rule_handles = initTable[string, int]() # rule -> handle
+		reload = false
 
 	proc rules_queue_all() =
-		debug("Rule schedule: all rules")
+		debug("Rules schedule: all rules")
 		ts_now = getMonoTime()
 		for unit, rules in rules.pairs:
 			if rules.len > 0: rule_queue[unit] = (ts: ts_now, apply: true)
@@ -341,6 +337,14 @@ proc main(argv: seq[string]) =
 				warn("Rule failed to apply: unit=", unit, " :: ", rule)
 				for line in err.msg.strip.splitLines: warn(line.indent(2))
 
+	proc rules_flush() =
+		nft.flush_rule_chains(rules.values.toSeq.concat)
+
+	if opt_flush:
+		debug("Flushing all affected nftables chains...")
+		rules_flush()
+
+	debug("Starting main loop...")
 	rules_queue_all() # initial try-them-all after flush
 	while true:
 		ts_now = getMonoTime(); ts_wake = ts_now; ts_wake_unit = ""
@@ -348,32 +352,38 @@ proc main(argv: seq[string]) =
 		for n, (unit, check) in rule_queue.pairs.toSeq:
 			if ts_now >= check.ts:
 				if check.apply:
-					debug("Rule apply: unit=", unit)
-					let rules = rules[unit]
-					if rules.len == 0: rules_queue_all() # one of the -u/--reload-with-unit
-					else: rules_apply(unit, rules)
+					debug("Rules apply: unit=", unit)
 					rule_queue[unit] = (ts: ts_now + opt_cooldown, apply: false)
+					let rules = rules[unit]
+					if rules.len == 0: reload = true # one of the -u/--reload-with-unit
+					else: rules_apply(unit, rules)
 				else:
 					rule_queue.del(unit)
-					debug("Rule cooldown expired: unit=", unit)
+					debug("Rules cooldown expired: unit=", unit)
 			elif check.ts < ts_wake or ts_wake == ts_now:
 				ts_wake = check.ts; ts_wake_unit = unit
+
+		if reload:
+			if opt_flush: rules_flush()
+			rules_queue_all()
+			reload = false
+			continue
 
 		let delay =
 			if ts_wake == ts_now: 3600_000_000'u64
 			else: uint64((ts_wake - ts_now).inMicroseconds)
 		if ts_wake_unit != "":
-			debug("Rule cooldown wait: unit=", ts_wake_unit, " us=", delay.nfmt)
+			debug("Rules cooldown wait: unit=", ts_wake_unit, " us=", delay.nfmt)
 		unit = sq.poll(rules, delay)
 		if unit == "": continue # timeout-wakeup
 
 		ts_now = getMonoTime()
 		rule_queue.withValue(unit, check):
 			if check.ts > ts_now:
-				debug( "Rule schedule delayed: unit=", unit,
+				debug( "Rules schedule delayed: unit=", unit,
 					" us=", (check.ts - ts_now).inMicroseconds.nfmt )
 				check.apply = true; continue # apply after cooldown
-		debug("Rule schedule now: unit=", unit)
+		debug("Rules schedule now: unit=", unit)
 		rule_queue[unit] = (ts: ts_now, apply: true)
 
 	debug("Finished")
