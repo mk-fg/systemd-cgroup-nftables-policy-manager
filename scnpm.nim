@@ -38,6 +38,7 @@ proc sd_journal_add_conjunction(sdj: sd_journal): cint {.importc, header: "<syst
 type
 	Journal = object
 		ctx: sd_journal
+		closed: bool
 		ret: cint
 		c_msg: cstring
 		c_msg_len: csize_t
@@ -45,7 +46,8 @@ type
 	JournalError = object of CatchableError
 
 template sdj_err(call: untyped, args: varargs[untyped]): cint =
-	o.ret = when varargsLen(args) > 0:
+	if o.closed: o.ret = -EPIPE
+	else: o.ret = when varargsLen(args) > 0:
 		`sd journal call`(o.ctx, args) else: `sd journal call`(o.ctx)
 	-o.ret
 template sdj(call: untyped, args: varargs[untyped]) =
@@ -59,11 +61,14 @@ template sdj_ret(call: untyped, args: varargs[untyped]): cint =
 method init(o: var Journal) {.base.} =
 	if sd_journal_open(o.ctx.unsafeAddr, SD_JOURNAL_LOCAL_ONLY) < 0:
 		raise newException(JournalError, "systemd journal open failed")
+	o.closed = false
 	sdj get_fd # to mimic journalctl.c - "means the first sd_journal_wait() will actually wait"
 	sdj seek_tail
 	sdj previous
 
-method close(o: var Journal) {.base.} = sd_journal_close(o.ctx)
+method close(o: var Journal) {.base.} =
+	o.closed = true
+	sd_journal_close(o.ctx)
 
 method setup_filters(o: var Journal) {.base.} =
 	# systemd journal match-list uses CNF logic, e.g. "level=X && (unit=A || ... || tag=B || ...) && ..."
@@ -181,6 +186,10 @@ method flush_rule_chains(o: NFTables, rules: openArray[string]) {.base.} =
 
 ### main
 
+var # globals for noconv
+	sq = Journal()
+	nft = NFTables()
+
 type ParseError = object of CatchableError
 
 proc parse_unit_rules(conf_list: seq[string]): Table[string, seq[string]] =
@@ -290,22 +299,12 @@ proc main(argv: seq[string]) =
 	addHandler(logger)
 
 	debug("Processing configuration...")
-	var
-		rules = parse_unit_rules(opt_nft_confs)
-		sq = Journal()
-		nft = NFTables()
+	var rules = parse_unit_rules(opt_nft_confs)
 	for unit in opt_reapply_with_unit: rules[unit] = @[] # special "rule" for reapply
 
 	debug("Parsed following cgroup rules (empty=reapply-rules):")
 	for unit, rules in rules.pairs:
 		for rule in rules: debug("  ", unit, " :: ", rule)
-
-	debug("Initializing nftables/journal components...")
-	nft.init()
-	defer: nft.close()
-	sq.init()
-	defer: sq.close()
-	sq.setup_filters()
 
 	var
 		ts_now: MonoTime
@@ -315,6 +314,19 @@ proc main(argv: seq[string]) =
 		rule_queue = initTable[string, tuple[ts: MonoTime, apply: bool]]()
 		rule_handles = initTable[string, int]() # rule -> handle
 		reapply = false
+
+	debug("Initializing nftables/journal components...")
+	nft.init()
+	defer: nft.close()
+	sq.init() # closed from signal handler to interrupt wait
+	sq.setup_filters()
+
+	var sa = Sigaction( sa_flags: 0,
+		sa_handler: proc (sig: cint) {.noconv.} =
+			debug("Got exit signal, shutting down evenloop..."); sq.close() )
+	if sigfillset(sa.sa_mask) != 0 or
+			sigaction(SIGINT, sa) != 0 or sigaction(SIGTERM, sa) != 0:
+		raiseOSError(osLastError())
 
 	proc rules_queue_all() =
 		debug("Rules schedule: all rules")
@@ -346,7 +358,7 @@ proc main(argv: seq[string]) =
 
 	debug("Starting main loop...")
 	rules_queue_all() # initial try-them-all after flush
-	while true:
+	while not sq.closed:
 		ts_now = getMonoTime(); ts_wake = ts_now; ts_wake_unit = ""
 
 		for n, (unit, check) in rule_queue.pairs.toSeq:
@@ -374,7 +386,10 @@ proc main(argv: seq[string]) =
 			else: uint64((ts_wake - ts_now).inMicroseconds)
 		if ts_wake_unit != "":
 			debug("Rules cooldown wait: unit=", ts_wake_unit, " us=", delay.nfmt)
-		unit = sq.poll(rules, delay)
+		try: unit = sq.poll(rules, delay)
+		except JournalError:
+			if sq.closed: break
+			raise
 		if unit == "": continue # timeout-wakeup
 
 		ts_now = getMonoTime()
