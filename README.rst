@@ -41,16 +41,16 @@ But when trying to put this into /etc/nftables.conf, it will fail to load on boo
 (same as similar iptables rules), as that "myapp.service" cgroup with a long
 path does not exist yet.
 
-Both nft/ipt rules use xt_cgroup kernel module that - when looking at the packet -
-actually matches numeric cgroup ID, and not the path string, and does not update
-those IDs dynamically when cgroups are created/removed in any way.
+Both nftables/iptables rules use xt_cgroup kernel module that - when looking at
+the packet - actually matches numeric cgroup ID, and not the path string, and
+does not update those IDs dynamically when cgroups are created/removed in any way.
 
 This means that:
 
 - Firewall rules can't be added for not-yet-existing cgroups.
 
-  Causes "Error: cgroupv2 path fails: No such file or directory" from nft and
-  "xt_cgroup: invalid path, errno=-2" error in dmesg for iptables.
+  Causes "Error: cgroupv2 path fails: No such file or directory" from "nft"
+  command and "xt_cgroup: invalid path, errno=-2" error in dmesg for iptables.
 
 - If cgroup gets removed and re-created, none of the existing rules will apply to it.
 
@@ -120,15 +120,15 @@ that should have access there, and hence are allowed to bypass such rule.
 Build / Install
 ---------------
 
-This is a small Nim_ command-line app, which can be built using any
-modern Nim compiler, e.g. using included Makefile::
+This is a small Nim_ command-line app, can be built with any modern
+`Nim compiler`_, e.g. using included Makefile::
 
   % make
   % ./scnpm --help
   Usage: ./scnpm [opts] [nft-configs ...]
   ...
 
-(or use ``nim c -d:release --opt:size scnpm.nim && strip scnpm`` without make)
+(or run ``nim c -d:release --opt:size scnpm.nim && strip scnpm`` without make)
 
 That should produce ~150K binary, linked against libsystemd (for journal access)
 and libnftables (to re-apply cgroupv2 nftables rules), which can then be installed
@@ -143,6 +143,7 @@ as well as system ones, which are sent through multiple transient dbus brokers,
 so much more difficult to reliably track there.
 
 .. _Nim: https://nim-lang.org/
+.. _Nim compiler: https://nim-lang.org/install_unix.html
 .. _scnpm.service: scnpm.service
 
 
@@ -187,14 +188,14 @@ previous runs are removed, and can be replaced with more fine-grained manual
 removal if these are not dedicated chains used for such dynamic rules only.
 
 Running without ``-d/--debug`` should not normally produce any output, unless
-there are some (non-critical) warnings like unexpected mismatch or nft error,
+there are some (non-critical) warnings like unexpected mismatch or nftables error,
 code bugs or fatal errors.
 
 Starting the tool on boot should be scheduled after nftables.service,
 so that ``--flush`` option will be able to find all required chains,
 and will exit with an error otherwise.
 
-Multiple nft rules linked to same systemd unit(s) are allowed.
+Multiple nftables rules linked to same systemd unit(s) are allowed.
 
 Changes in parsed config files are not auto-detected, and only applied on
 tool restart, which can be done explicitly after changes, configured in
@@ -202,10 +203,10 @@ nftables.service (e.g. via PropagatesReloadTo= and/or BindsTo=)
 or systemd.path unit monitoring state of such source configuration files.
 
 To handle automated nftables-flush events without actual config changes
-(like network auto-restart on laptop wakeup), there's ``-u/--reload-with-unit``
-option to flush/reapply all rules when such system unit restarts.
+(like network auto-restart on laptop wakeup), there's ``-u/--reapply-with-unit``
+option to only flush/reapply all same rules when such system unit restarts.
 
-Syntax errors in nft rules should produce warnings when these are applied on
+Syntax errors in nftables rules should produce warnings when these are applied on
 tool start or changes, so should be hard to miss, but maybe do check "nft list chain"
 or debug output when rules are supposed to be enabled after conf updates anyway.
 

@@ -3,7 +3,7 @@ After=nftables.service
 
 [Service]
 Type=exec
-ExecStart=scnpm --flush --reload-with-unit nftables.service /etc/nftables.conf
+ExecStart=scnpm --flush --reapply-with-unit nftables.service /etc/nftables.conf
 
 DynamicUser=yes
 SupplementaryGroups=systemd-journal

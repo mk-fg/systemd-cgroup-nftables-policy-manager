@@ -235,11 +235,11 @@ proc main_help(err="") =
 			Flush nft chain(s) used in all parsed cgroup-rules on start, to cleanup leftovers
 				from previous run(s), as otherwise only rules added at runtime get replaced/removed.
 
-		-u / --reload-with-unit unit-name
-			Reload rules (and flush chain[s] with -f/--flush) on system unit state changes.
+		-u / --reapply-with-unit unit-name
+			Re-apply rules (and flush chain[s] with -f/--flush) on systemd unit state changes.
 			Can be useful to pass something like nftables.service with this option,
 				as restarting that usually flushes nft rulesets and all dynamic rules in there.
-			Option can be used multiple times to reload for any of the specified units.
+			Option can be used multiple times to act on events from any of the specified units.
 
 		-c / --cooldown milliseconds
 			Min interval between applying rules for the same cgroup/unit (default=1s).
@@ -255,7 +255,7 @@ proc main(argv: seq[string]) =
 		opt_flush = false
 		opt_debug = false
 		opt_cooldown = initDuration(seconds=1)
-		opt_reload_with_unit = newSeq[string]()
+		opt_reapply_with_unit = newSeq[string]()
 		opt_nft_confs = newSeq[string]()
 
 	block cli_parser:
@@ -266,7 +266,7 @@ proc main(argv: seq[string]) =
 			if opt_last == "": return
 			main_help &"{opt_fmt(opt_last)} option unrecognized or requires a value"
 		proc opt_set(k: string, v: string) =
-			if k in ["u", "reload-with-unit"]: opt_reload_with_unit.add(v)
+			if k in ["u", "reapply-with-unit"]: opt_reapply_with_unit.add(v)
 			elif k in ["c", "cooldown"]: opt_cooldown = initDuration(milliseconds=v.parseInt)
 			else: main_help &"Unrecognized option [ {opt_fmt(k)} = {v} ]"
 
@@ -294,7 +294,7 @@ proc main(argv: seq[string]) =
 		rules = parse_unit_rules(opt_nft_confs)
 		sq = Journal()
 		nft = NFTables()
-	for unit in opt_reload_with_unit: rules[unit] = @[] # special "rule" for reload
+	for unit in opt_reapply_with_unit: rules[unit] = @[] # special "rule" for reapply
 
 	debug("Parsed following cgroup rules (empty=reapply-rules):")
 	for unit, rules in rules.pairs:
@@ -314,7 +314,7 @@ proc main(argv: seq[string]) =
 		unit: string
 		rule_queue = initTable[string, tuple[ts: MonoTime, apply: bool]]()
 		rule_handles = initTable[string, int]() # rule -> handle
-		reload = false
+		reapply = false
 
 	proc rules_queue_all() =
 		debug("Rules schedule: all rules")
@@ -355,7 +355,7 @@ proc main(argv: seq[string]) =
 					debug("Rules apply: unit=", unit)
 					rule_queue[unit] = (ts: ts_now + opt_cooldown, apply: false)
 					let rules = rules[unit]
-					if rules.len == 0: reload = true # one of the -u/--reload-with-unit
+					if rules.len == 0: reapply = true # one of the -u/--reapply-with-unit
 					else: rules_apply(unit, rules)
 				else:
 					rule_queue.del(unit)
@@ -363,10 +363,10 @@ proc main(argv: seq[string]) =
 			elif check.ts < ts_wake or ts_wake == ts_now:
 				ts_wake = check.ts; ts_wake_unit = unit
 
-		if reload:
+		if reapply:
 			if opt_flush: rules_flush()
 			rules_queue_all()
-			reload = false
+			reapply = false
 			continue
 
 		let delay =
