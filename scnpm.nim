@@ -189,6 +189,7 @@ method flush_rule_chains(o: NFTables, rules: openArray[string]) {.base.} =
 var # globals for noconv
 	sq = Journal()
 	nft = NFTables()
+	reexec = false
 
 type ParseError = object of CatchableError
 
@@ -240,22 +241,26 @@ proc main_help(err="") =
 		Small tool that adds and updates nftables cgroupv2 filtering
 			rules for systemd-managed per-unit cgroups (slices, services, scopes).
 
-		-f / --flush
+		 -f / --flush
 			Flush nft chain(s) used in all parsed cgroup-rules on start, to cleanup leftovers
 				from previous run(s), as otherwise only rules added at runtime get replaced/removed.
 
-		-u / --reapply-with-unit unit-name
-			Re-apply rules (and flush chain[s] with -f/--flush) on systemd unit state changes.
-			Can be useful to pass something like nftables.service with this option,
-				as restarting that usually flushes nft rulesets and all dynamic rules in there.
+		 -u / --reload-with-unit unit-name
+			Reload and re-apply all rules (and do -f/--flush if enabled) on systemd unit state changes.
+			Can be useful to pass something like nftables.service with this option, as restarting
+				that usually flushes nft rulesets and can indicates changes in the dynamic rules there.
 			Option can be used multiple times to act on events from any of the specified units.
+			Same as restarting the tool, done via simple re-exec internally, runs on SIGHUP.
 
-		-c / --cooldown milliseconds
-			Min interval between applying rules for the same cgroup/unit (default=1s).
+		 -a / --reapply-with-unit unit-name
+			Same as -u/--reload-with-unit, but does not reload the rules.
+
+		 -c / --cooldown milliseconds
+			Min interval between applying rules for the same cgroup/unit (default=300ms).
 			If multiple events for same unit are detected,
 				subsequent ones are queued to apply after this interval.
 
-		-d / --debug -- Verbose operation mode.
+		 -d / --debug -- Verbose operation mode.
 		""")
 	quit 0
 
@@ -263,8 +268,9 @@ proc main(argv: seq[string]) =
 	var
 		opt_flush = false
 		opt_debug = false
-		opt_cooldown = initDuration(seconds=1)
-		opt_reapply_with_unit = newSeq[string]()
+		opt_cooldown = initDuration(milliseconds=300)
+		opt_reapply_units = newSeq[string]()
+		opt_reexec_units = newSeq[string]()
 		opt_nft_confs = newSeq[string]()
 
 	block cli_parser:
@@ -275,7 +281,8 @@ proc main(argv: seq[string]) =
 			if opt_last == "": return
 			main_help &"{opt_fmt(opt_last)} option unrecognized or requires a value"
 		proc opt_set(k: string, v: string) =
-			if k in ["u", "reapply-with-unit"]: opt_reapply_with_unit.add(v)
+			if k in ["u", "reload-with-unit"]: opt_reexec_units.add(v)
+			elif k in ["a", "reapply-with-unit"]: opt_reapply_units.add(v)
 			elif k in ["c", "cooldown"]: opt_cooldown = initDuration(milliseconds=v.parseInt)
 			else: main_help &"Unrecognized option [ {opt_fmt(k)} = {v} ]"
 
@@ -300,11 +307,25 @@ proc main(argv: seq[string]) =
 
 	debug("Processing configuration...")
 	var rules = parse_unit_rules(opt_nft_confs)
-	for unit in opt_reapply_with_unit: rules[unit] = @[] # special "rule" for reapply
+	for unit in opt_reexec_units: rules[unit] = @[]
+	for unit in opt_reapply_units: rules[unit] = @[] # special "rules" to reapply/reexec
 
 	debug("Parsed following cgroup rules (empty=reapply-rules):")
 	for unit, rules in rules.pairs:
 		for rule in rules: debug("  ", unit, " :: ", rule)
+
+	debug("Initializing nftables/journal components...")
+	nft.init()
+	defer: nft.close()
+	sq.init() # closed from signal handler to interrupt wait
+	sq.setup_filters()
+
+	onSignal(SIGINT, SIGTERM, SIGHUP):
+		if sig == SIGHUP:
+			debug("Got re-exec signal, restarting...")
+			reexec = true
+		else: debug("Got exit signal, shutting down...")
+		sq.close()
 
 	var
 		ts_now: MonoTime
@@ -314,19 +335,6 @@ proc main(argv: seq[string]) =
 		rule_queue = initTable[string, tuple[ts: MonoTime, apply: bool]]()
 		rule_handles = initTable[string, int]() # rule -> handle
 		reapply = false
-
-	debug("Initializing nftables/journal components...")
-	nft.init()
-	defer: nft.close()
-	sq.init() # closed from signal handler to interrupt wait
-	sq.setup_filters()
-
-	var sa = Sigaction( sa_flags: 0,
-		sa_handler: proc (sig: cint) {.noconv.} =
-			debug("Got exit signal, shutting down evenloop..."); sq.close() )
-	if sigfillset(sa.sa_mask) != 0 or
-			sigaction(SIGINT, sa) != 0 or sigaction(SIGTERM, sa) != 0:
-		raiseOSError(osLastError())
 
 	proc rules_queue_all() =
 		debug("Rules schedule: all rules")
@@ -367,7 +375,9 @@ proc main(argv: seq[string]) =
 					debug("Rules apply: unit=", unit)
 					rule_queue[unit] = (ts: ts_now + opt_cooldown, apply: false)
 					let rules = rules[unit]
-					if rules.len == 0: reapply = true # one of the -u/--reapply-with-unit
+					if rules.len == 0: # one of the -u/--re*-with-unit
+						if unit in opt_reexec_units: reexec = true; sq.close()
+						else: reapply = true
 					else: rules_apply(unit, rules)
 				else:
 					rule_queue.del(unit)
@@ -401,6 +411,10 @@ proc main(argv: seq[string]) =
 		debug("Rules schedule now: unit=", unit)
 		rule_queue[unit] = (ts: ts_now, apply: true)
 
+	if reexec:
+		debug("Restarting tool via exec...")
+		let app = getAppFilename()
+		discard execv(app.cstring, concat(@[app], argv).allocCStringArray)
 	debug("Finished")
 
-when is_main_module: main(os.commandLineParams())
+when is_main_module: main(commandLineParams())

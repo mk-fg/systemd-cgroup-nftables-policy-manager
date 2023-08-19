@@ -4,6 +4,7 @@ After=nftables.service
 [Service]
 Type=exec
 ExecStart=scnpm --flush --reapply-with-unit nftables.service /etc/nftables.conf
+ExecReload=kill -HUP $MAINPID
 
 DynamicUser=yes
 SupplementaryGroups=systemd-journal

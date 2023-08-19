@@ -197,14 +197,13 @@ and will exit with an error otherwise.
 
 Multiple nftables rules linked to same systemd unit(s) are allowed.
 
-Changes in parsed config files are not auto-detected, and only applied on
-tool restart, which can be done explicitly after changes, configured in
-nftables.service (e.g. via PropagatesReloadTo= and/or BindsTo=)
-or systemd.path unit monitoring state of such source configuration files.
-
-To handle automated nftables-flush events without actual config changes
-(like network auto-restart on laptop wakeup), there's ``-u/--reapply-with-unit``
-option to only flush/reapply all same rules when such system unit restarts.
+Changes in parsed config files are not auto-detected, and only applied by
+either sending SIGHUP or tool restart, which can be done manually after changes,
+configured in nftables.service (e.g. via PropagatesReloadTo= and/or BindsTo=)
+or systemd.path unit monitoring state of source configuration file(s);
+or - without signal - using ``-u/--reload-with-unit`` or ``-a/--reapply-with-unit``
+opts, since this tool monitors systemd unit states anyway, and can spot when
+things restart there on its own.
 
 Syntax errors in nftables rules should produce warnings when these are applied on
 tool start or changes, so should be hard to miss, but maybe do check "nft list chain"
