@@ -376,8 +376,13 @@ proc main(argv: seq[string]) =
 					rule_queue[unit] = (ts: ts_now + opt_cooldown, apply: false)
 					let rules = rules[unit]
 					if rules.len == 0: # one of the -u/--re*-with-unit
-						if unit in opt_reexec_units: reexec = true; sq.close()
-						else: reapply = true
+						if unit in opt_reexec_units:
+							debug("Rule for reload-with-unit event, restarting...")
+							reexec = true; sq.close()
+						else:
+							debug("Rule for reapply-with-unit event")
+							reapply = true
+						break
 					else: rules_apply(unit, rules)
 				else:
 					rule_queue.del(unit)
