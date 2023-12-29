@@ -16,7 +16,7 @@ PrivateDevices=yes
 CapabilityBoundingSet=CAP_NET_ADMIN
 AmbientCapabilities=CAP_NET_ADMIN
 RestrictAddressFamilies=AF_NETLINK
-SecureBits=keep-caps-locked noroot-locked
+SecureBits=noroot-locked
 SystemCallFilter=@system-service
 
 [Install]
