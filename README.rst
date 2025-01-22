@@ -11,6 +11,22 @@ This repository URLs:
 - https://fraggod.net/code/git/systemd-cgroup-nftables-policy-manager
 
 
+Deprecation notice
+------------------
+
+This tool was made to fix specific issue, which should also be addressed
+by systemd versions 255+ (2023-12-06 and later), that provide NFTSet=
+option in unit files (see `"man systemd.resource-control"`_).
+
+I'll likely migrate to using that myself, but tool in this repo might
+still be useful for non-systemd linux distros, or if option there doesn't
+work for whatever reason, otherwise I'd recommend trying that simpler
+built-in systemd option first as well.
+
+.. _"man systemd.resource-control":
+  https://man.archlinux.org/man/systemd.resource-control.5
+
+
 Description
 -----------
 
