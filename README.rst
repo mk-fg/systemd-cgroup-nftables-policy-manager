@@ -11,21 +11,6 @@ This repository URLs:
 - https://fraggod.net/code/git/systemd-cgroup-nftables-policy-manager
 
 
-Deprecation notice
-------------------
-
-This tool was made to fix specific issue, which should also be addressed
-by systemd versions 255+ (2023-12-06 and later), that provide NFTSet=
-option in unit files (see `"man systemd.resource-control"`_).
-
-I'll likely migrate to using that myself, but tool in this repo might
-still be useful for non-systemd linux distros, or if option there doesn't
-work for whatever reason, otherwise I'd recommend trying that simpler
-built-in systemd option first as well.
-
-.. _"man systemd.resource-control":
-  https://man.archlinux.org/man/systemd.resource-control.5
-
 
 Description
 -----------
@@ -37,8 +22,18 @@ systemd_-managed per-unit cgroups (slices, services, scopes).
 stable in linux since 2015), works differently from old cgroup implementation,
 and is the only one supported here.
 
+Similar capability have also been added to systemd versions 255+ (2023-12-06 and
+later) via NFTSet= option in unit files (see `"man systemd.resource-control"`_),
+but its use is limited to system units (can't be used in ``~/.config/systemd/user``
+session units).
+
+This tool is somewhat redundant with that functionality, but can still be useful
+for user session units, or if NFTSet= doesn't work for some purpose/reason.
+
 .. _nftables: https://nftables.org/
 .. _systemd: https://systemd.io/
+.. _"man systemd.resource-control":
+  https://man.archlinux.org/man/systemd.resource-control.5
 
 
 Problem that it addressess
@@ -84,6 +79,10 @@ firewalls are initialized (and often can't be started on boot - e.g. user units)
 Solution:
 ~~~~~~~~~
 
+Since this tool was written, ``NFTSet=`` directive was added to systemd,
+which mostly addresses this for system units already - use that if possible,
+and see caveats section below for some of potential shortcomings there.
+
 Monitor cgroup (or systemd unit) creation/removal events and (re-)apply any
 relevant rules to these dynamically.
 
@@ -101,19 +100,8 @@ So that's pretty much what this simple tool does, subscribing to systemd unit
 start/stop events via journal (using libsystemd) and updating any relevant rules
 on events from there (using libnftables).
 
-It was proposed for systemd itself to do something like that in `systemd#7327`_,
-but is unlikely to be implemented, as (at least so far) systemd does not manage
-netfilter firewall configurations.
-
-Note that systemd has built-in network filtering via eBPFs attached to cgroups
-(IPAddressAllow/Deny=, BPFProgram=, IPEgressFilterPath= and similar options)
-which can be used as an alternative to this kind of system-wide policy approach
-for at least some use-cases, though might be more difficult to combine and maintain
-in multiple places, with more lax permissions, and with limited matching capabilities.
-
 .. _how "socket cgroupv2" matcher in nftables is intended to work:
   https://patchwork.ozlabs.org/project/netfilter-devel/patch/1479114761-19534-1-git-send-email-pablo@netfilter.org/#1511797
-.. _systemd#7327: https://github.com/systemd/systemd/issues/7327
 
 
 Intended use-case:
@@ -130,6 +118,10 @@ and that is trivial to block with a single firewall rule.
 
 This tool is intended to manage a whitelist of rules for systemd units on top,
 that should have access there, and hence are allowed to bypass such rule.
+
+Again, systemd has aforementioned NFTSet= option, as well as network filtering
+via eBPFs attached to cgroups (IPAddressAllow/Deny=, BPFProgram=, IPEgressFilterPath=
+and such), which can be used as an alternative to this tool.
 
 
 
@@ -232,8 +224,39 @@ running this as full root.
 
 
 
+Caveats and limitations
+-----------------------
+
+- Due to "best-effort" nature of trying to apply rules when unit startup is
+  detected, and an inherent race condition between systemd creating
+  service/cgroup and rule being applied, I'd heavily recommend to always use
+  allow-listing rules with this tool, which fail on the safe side.
+
+- I think "cgroupv2" in nftables rule must be the one where network socket was
+  created, and not the one where systemd might move the process using it.
+
+  So for incoming ssh connections for example, "sshd-session" process might
+  end up in session-N.scope under user.slice, but nftables will only match it
+  as belonging to sshd.service cgroup, so some rules might need to have different
+  cgroup string in the rule than a name that triggers the rule to the left of it.
+
+  Not 100% sure that's how it works or supposed to work, but have observed it earlier.
+
+- Use HUP signal, ``-u/--reload-with-unit`` (same as SIGHUP) or ``-a/--reapply-with-unit``
+  option to restore transient cgroup-specific rules after nftables restart
+  or other firewall resets that'd remove those.
+
+
+
 Links
 -----
+
+- `systemd.resource-control(5)`_ manpage that describes implementation of
+  similar functionality there - lookup ``NFTSet=`` option.
+
+- `Systemd firewall integration suggestions (issue #7327)`_ - more comprehensive
+  netfilter integration than NFTSet= option above, still at a proposal/suggestion
+  stage at the moment (2025-04-10), neither accepted nor rejected.
 
 - `helsinki-systems/nft_cgroupv2`_ - alternative third-party implementation of
   such matching in nftables.
@@ -244,8 +267,6 @@ Links
 
   Might conflict with current upstream nftables implementation due to "cgroupv2"
   keyword used there as well.
-
-- Systemd RFE-7327 about this sort of thing: https://github.com/systemd/systemd/issues/7327
 
 - `Upstreamed "netfilter: nft_socket: add support for cgroupsv2" patch
   <https://patchwork.ozlabs.org/project/netfilter-devel/patch/20210426171056.345271-3-pablo@netfilter.org/>`_
@@ -258,5 +279,8 @@ Links
 - Earlier version of this tool was written in OCaml_, and can be last found in `commit
   048a8128 <https://github.com/mk-fg/systemd-cgroup-nftables-policy-manager/tree/048a8128>`_.
 
+.. _systemd.resource-control(5): https://man.archlinux.org/man/systemd.resource-control.5
+.. _Systemd firewall integration suggestions (issue #7327):
+  https://github.com/systemd/systemd/issues/7327
 .. _helsinki-systems/nft_cgroupv2: https://github.com/helsinki-systems/nft_cgroupv2/
 .. _OCaml: https://ocaml.org/
