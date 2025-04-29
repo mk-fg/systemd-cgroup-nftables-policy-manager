@@ -14,7 +14,9 @@ template nfmt(v: untyped): string = ($v).insertSep # format integer with digit g
 
 {.passl: "-lsystemd"}
 
-type sd_journal {.importc: "sd_journal*", header: "<systemd/sd-journal.h>".} = distinct pointer
+type
+	sd_journal {.importc: "sd_journal*", header: "<systemd/sd-journal.h>".} = object
+	sd_journal_msg {.importc: "const void*".} = cstring
 let
 	SD_JOURNAL_LOCAL_ONLY {.importc, nodecl.}: cint
 	SD_JOURNAL_NOP {.importc, nodecl.}: cint
@@ -29,7 +31,7 @@ proc sd_journal_wait(sdj: sd_journal, timeout_us: uint64): cint {.importc, heade
 proc sd_journal_next(sdj: sd_journal): cint {.importc, header: "<systemd/sd-journal.h>".}
 proc sd_journal_previous(sdj: sd_journal): cint {.importc, header: "<systemd/sd-journal.h>".}
 proc sd_journal_get_data( sdj: sd_journal, field: cstring,
-	msg: ptr cstring, msg_len: ptr csize_t ): cint {.importc, header: "<systemd/sd-journal.h>".}
+	msg: ptr sd_journal_msg, msg_len: ptr csize_t ): cint {.importc, header: "<systemd/sd-journal.h>".}
 proc sd_journal_add_match( sdj: sd_journal,
 	s: cstring, s_len: csize_t ): cint {.importc, header: "<systemd/sd-journal.h>".}
 proc sd_journal_add_disjunction(sdj: sd_journal): cint {.importc, header: "<systemd/sd-journal.h>".} # OR
@@ -40,7 +42,7 @@ type
 		ctx: sd_journal
 		closed: bool
 		ret: cint
-		c_msg: cstring
+		c_msg: sd_journal_msg
 		c_msg_len: csize_t
 		field: string
 	JournalError = object of CatchableError
@@ -59,7 +61,7 @@ template sdj_ret(call: untyped, args: varargs[untyped]): cint =
 	o.ret
 
 method init(o: var Journal) {.base.} =
-	if sd_journal_open(o.ctx.unsafeAddr, SD_JOURNAL_LOCAL_ONLY) < 0:
+	if sd_journal_open(o.ctx.addr, SD_JOURNAL_LOCAL_ONLY) < 0:
 		raise newException(JournalError, "systemd journal open failed")
 	o.closed = false
 	sdj get_fd # to mimic journalctl.c - "means the first sd_journal_wait() will actually wait"
