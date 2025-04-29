@@ -1,8 +1,7 @@
 all: scnpm
 
 scnpm: scnpm.nim
-	nim c -d:release --opt:size $<
-	strip $@
+	nim c -d:release -d:strip -d:lto_incremental --opt:size $<
 
 clean:
 	rm -f scnpm

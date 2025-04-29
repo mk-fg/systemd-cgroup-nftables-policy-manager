@@ -1,7 +1,7 @@
 #? replace(sub = "\t", by = "  ")
 #
 # Debug build/run: nim c -w=on --hints=on -r scnpm.nim -h
-# Final build: nim c -d:release --opt:size scnpm.nim && strip scnpm
+# Final build: nim c -d:release -d:strip -d:lto_incremental --opt:size scnpm.nim
 # Usage info: ./scnpm -h
 
 import std/[ parseopt, os, posix, logging, sugar,

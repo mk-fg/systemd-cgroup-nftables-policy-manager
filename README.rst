@@ -136,7 +136,7 @@ This is a small Nim_ command-line app, can be built with any modern
   Usage: ./scnpm [opts] [nft-configs ...]
   ...
 
-(or run ``nim c -d:release --opt:size scnpm.nim && strip scnpm`` without make)
+(or run ``nim c -d:release -d:strip -d:lto_incremental --opt:size scnpm.nim`` without make)
 
 That should produce ~150K binary, linked against libsystemd (for journal access)
 and libnftables (to re-apply cgroupv2 nftables rules), which can then be installed
