@@ -234,9 +234,7 @@ proc main_help(err="") =
 	let app = getAppFilename().lastPathPart
 	if err != "": print &"ERROR: {err}"
 	print &"\nUsage: {app} [opts] [nft-configs ...]"
-	if err != "":
-		print &"Run '{app} --help' for more information"
-		quit 0
+	if err != "": print &"Run '{app} --help' for more information"; quit 1
 	print dedent(&"""
 
 		systemd cgroup (v2) nftables policy manager.
